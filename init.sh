@@ -200,6 +200,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Copy scripts
 copy_file "$SCRIPT_DIR/sources/scripts/deploy-service.sh" "$ROOT_DIR/deploy-service.sh" "deploy-service.sh"
 copy_file "$SCRIPT_DIR/sources/scripts/nginx-reload.sh" "$ROOT_DIR/scripts/nginx-reload.sh" "nginx-reload.sh"
+copy_file "$SCRIPT_DIR/sources/scripts/update-nginx-config.sh" "$ROOT_DIR/scripts/update-nginx-config.sh" "update-nginx-config.sh"
 copy_file "$SCRIPT_DIR/sources/scripts/certbot-gen.sh" "$ROOT_DIR/scripts/certbot-gen.sh" "certbot-gen.sh"
 copy_file "$SCRIPT_DIR/sources/scripts/certbot-renew.sh" "$ROOT_DIR/scripts/certbot-renew.sh" "certbot-renew.sh"
 
