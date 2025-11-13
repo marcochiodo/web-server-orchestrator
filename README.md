@@ -46,8 +46,8 @@ WSO orchestrates containerized web services using Docker Swarm, with a globally 
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/MultiServiceWebServer.git
-cd MultiServiceWebServer
+git clone https://github.com/marcochiodo/web-server-orchestrator
+cd web-server-orchestrator
 ```
 
 2. Run the installation script as root:
