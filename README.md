@@ -86,6 +86,7 @@ After installation, your WSO instance will be ready at the configured directory 
 │   └── certbot-renew.sh       # Renew SSL certificates
 ├── nginx-templates/           # Nginx configuration templates
 │   ├── ssl-common.conf.template
+│   ├── proxy-common.conf.template
 │   └── proxy.template
 ├── static/
 │   ├── default/              # Default webroot for nginx
@@ -107,18 +108,23 @@ After installation, your WSO instance will be ready at the configured directory 
 mkdir -p /srv/wso/services/myapp
 ```
 
-2. Create a `deploy.sh` script. A complete example that includes nginx configuration updates:
+2. Create a `deploy.sh` script. A complete example that supports multiple environments:
 ```bash
 #!/bin/sh
 # Example deployment script with nginx configuration updates
+# Usage: ./deploy.sh [environment]
 set -eu
+
+# Get environment from argument (default: production)
+ENVIRONMENT="${1:-production}"
 
 # Configuration
 SERVICE_NAME="myapp"
-IMAGE_NAME="registry.example.com/myapp:latest"
-DOCKER_SERVICE_NAME="${SERVICE_NAME}-prod"
+IMAGE_NAME="registry.example.com/myapp:${ENVIRONMENT}"
+DOCKER_SERVICE_NAME="${SERVICE_NAME}-${ENVIRONMENT}"
+NGINX_CONFIG_NAME="${SERVICE_NAME}-${ENVIRONMENT}"
 ROOT_DIR="${ROOT_DIR:-/srv/wso}"
-TEMP_NGINX_CONFIG="/tmp/${SERVICE_NAME}-nginx-$$.conf"
+TEMP_NGINX_CONFIG="/tmp/${SERVICE_NAME}-${ENVIRONMENT}-nginx-$$.conf"
 
 # Cleanup on exit
 cleanup() {
@@ -130,11 +136,13 @@ trap cleanup EXIT
 docker pull "$IMAGE_NAME"
 
 # Extract nginx configuration from the image
-# (assumes the image contains nginx config at /app/nginx.conf)
-docker run --rm "$IMAGE_NAME" cat /app/nginx.conf > "$TEMP_NGINX_CONFIG"
+# (assumes the image contains environment-specific configs like:
+#  /app/nginx-production.conf, /app/nginx-staging.conf)
+docker run --rm "$IMAGE_NAME" cat "/app/nginx-${ENVIRONMENT}.conf" > "$TEMP_NGINX_CONFIG"
 
 # Update nginx configuration (with checksum comparison and validation)
-sh "$ROOT_DIR/scripts/update-nginx-config.sh" "$SERVICE_NAME" "$TEMP_NGINX_CONFIG"
+# This creates/updates: myapp-production.conf.template or myapp-staging.conf.template
+sh "$ROOT_DIR/scripts/update-nginx-config.sh" "$NGINX_CONFIG_NAME" "$TEMP_NGINX_CONFIG"
 
 # Update or create the Docker service
 if docker service ls --format '{{.Name}}' | grep -q "^${DOCKER_SERVICE_NAME}$"; then
@@ -148,7 +156,7 @@ else
 fi
 ```
 
-See `sources/examples/service-deploy.sh` for a more detailed template.
+See `sources/examples/service-deploy.sh` for a more detailed template with validation.
 
 3. Make it executable:
 ```bash
@@ -156,16 +164,44 @@ chmod +x /srv/wso/services/myapp/deploy.sh
 ```
 
 4. Deploy using the wrapper script:
+
+Deploy to production (default):
 ```bash
 sudo sh /srv/wso/deploy-service.sh myapp
 ```
+
+Deploy to staging:
+```bash
+sudo sh /srv/wso/deploy-service.sh myapp staging
+```
+
+Deploy to development:
+```bash
+sudo sh /srv/wso/deploy-service.sh myapp development
+```
+
+The script will automatically:
+- Pull the image with the appropriate tag (e.g., `myapp:staging`, `myapp:production`)
+- Create/update the service with environment-specific name (e.g., `myapp-staging`, `myapp-production`)
+- Generate separate nginx configurations (e.g., `myapp-staging.conf.template`, `myapp-production.conf.template`)
 
 ### Remote Deployment
 
 For automated deployments from CI/CD pipelines or remote machines, you can use SSH to trigger service deployments:
 
+Deploy to production:
 ```bash
 ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp
+```
+
+Deploy to staging:
+```bash
+ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp staging
+```
+
+Deploy to development:
+```bash
+ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp development
 ```
 
 Replace `/srv/wso` with your actual installation directory if different.
@@ -231,6 +267,8 @@ The `update-nginx-config.sh` script automates the process of updating nginx conf
 7. Rolls back to the backup if validation fails
 
 **Example usage in deployment scripts:**
+
+For single-environment deployments:
 ```bash
 # Extract nginx config from Docker image
 docker run --rm myapp:latest cat /app/nginx.conf > /tmp/myapp-nginx.conf
@@ -238,6 +276,18 @@ docker run --rm myapp:latest cat /app/nginx.conf > /tmp/myapp-nginx.conf
 # Update nginx configuration safely
 sh /srv/wso/scripts/update-nginx-config.sh myapp /tmp/myapp-nginx.conf
 ```
+
+For multi-environment deployments:
+```bash
+# Extract environment-specific nginx config
+ENVIRONMENT="production"  # or staging, development
+docker run --rm myapp:${ENVIRONMENT} cat "/app/nginx-${ENVIRONMENT}.conf" > /tmp/myapp-nginx.conf
+
+# Update nginx configuration with environment-specific name
+sh /srv/wso/scripts/update-nginx-config.sh "myapp-${ENVIRONMENT}" /tmp/myapp-nginx.conf
+```
+
+**Note:** Your Docker images should include environment-specific nginx configurations (e.g., `/app/nginx-production.conf`, `/app/nginx-staging.conf`) if you plan to deploy multiple environments. These configs typically differ in domain names, SSL certificates, and upstream service names.
 
 This approach ensures:
 - No downtime due to syntax errors
@@ -259,14 +309,14 @@ server {
     ssl_certificate     /etc/letsencrypt/live/myapp.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/myapp.example.com/privkey.pem;
 
+    # Include common SSL configuration
     include /etc/nginx/conf.d/ssl-common.conf;
 
     location / {
         proxy_pass http://myapp-service:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Include common proxy configuration (headers, timeouts, buffering, websockets)
+        include /etc/nginx/conf.d/proxy-common.conf;
     }
 }
 ```
@@ -280,6 +330,14 @@ server {
 ```bash
 /srv/wso/scripts/nginx-reload.sh
 ```
+
+**Note on common configuration files:**
+
+WSO provides reusable configuration snippets to avoid duplication:
+- **`ssl-common.conf`**: TLS protocols, ciphers, HSTS headers - included once per server block
+- **`proxy-common.conf`**: Proxy headers, timeouts, buffering, websocket support - included in each proxy location
+
+These files are automatically installed to `/srv/wso/nginx-templates/` and mounted into the nginx container at `/etc/nginx/conf.d/`. You can customize them to apply changes across all services.
 
 ### SSL Certificate Management
 
@@ -327,7 +385,8 @@ The `sources/` directory contains templates and examples:
 
 - `sources/nginx/` - Nginx configuration templates
   - `proxy.template` - Reverse proxy configuration example
-  - `ssl-common.conf.template` - Common SSL settings
+  - `ssl-common.conf.template` - Common SSL settings (TLS protocols, ciphers, HSTS)
+  - `proxy-common.conf.template` - Common proxy settings (headers, timeouts, buffering, websockets)
 - `sources/scripts/` - System management scripts
   - `deploy-service.sh` - Secure service deployment wrapper
   - `nginx-reload.sh` - Nginx configuration reload

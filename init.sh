@@ -210,6 +210,7 @@ chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
 
 # Copy nginx templates
 copy_file "$SCRIPT_DIR/sources/nginx/ssl-common.conf.template" "$ROOT_DIR/nginx-templates/ssl-common.conf.template" "ssl-common.conf.template"
+copy_file "$SCRIPT_DIR/sources/nginx/proxy-common.conf.template" "$ROOT_DIR/nginx-templates/proxy-common.conf.template" "proxy-common.conf.template"
 copy_file "$SCRIPT_DIR/sources/nginx/nginx-proxy.template" "$ROOT_DIR/nginx-templates/proxy.template" "nginx-proxy.template"
 
 # Copy static files
