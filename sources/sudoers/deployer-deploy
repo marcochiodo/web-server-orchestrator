@@ -1,0 +1,5 @@
+# Allow deployer user to run deploy-service.sh script with root privileges
+# This file will be installed to /etc/sudoers.d/deployer-deploy
+# The ROOT_DIR placeholder will be replaced during installation
+
+deployer ALL=(root) NOPASSWD: /bin/sh ROOT_DIR/deploy-service.sh *
