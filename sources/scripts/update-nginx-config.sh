@@ -25,7 +25,7 @@ fi
 SERVICE_NAME="$1"
 SOURCE_FILE="$2"
 ROOT_DIR="${ROOT_DIR:-/srv/wso}"
-TARGET_FILE="$ROOT_DIR/nginx-templates/${SERVICE_NAME}.conf.template"
+TARGET_FILE="$ROOT_DIR/nginx-conf/${SERVICE_NAME}.conf"
 BACKUP_FILE="${TARGET_FILE}.backup"
 
 # Validate service name (alphanumeric, dash, underscore only)

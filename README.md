@@ -84,10 +84,10 @@ After installation, your WSO instance will be ready at the configured directory 
 │   ├── update-nginx-config.sh # Update and validate nginx config for a service
 │   ├── certbot-gen.sh         # Generate SSL certificates
 │   └── certbot-renew.sh       # Renew SSL certificates
-├── nginx-templates/           # Nginx configuration templates
-│   ├── ssl-common.conf.template
-│   ├── proxy-common.conf.template
-│   └── proxy.template
+├── nginx-conf/                # Nginx configuration files
+│   ├── ssl-common.conf
+│   ├── proxy-common.conf
+│   └── proxy.conf
 ├── static/
 │   ├── default/              # Default webroot for nginx
 │   └── sites/                # Static sites directory
@@ -141,7 +141,7 @@ docker pull "$IMAGE_NAME"
 docker run --rm "$IMAGE_NAME" cat "/app/nginx-${ENVIRONMENT}.conf" > "$TEMP_NGINX_CONFIG"
 
 # Update nginx configuration (with checksum comparison and validation)
-# This creates/updates: myapp-production.conf.template or myapp-staging.conf.template
+# This creates/updates: myapp-production.conf or myapp-staging.conf
 sh "$ROOT_DIR/scripts/update-nginx-config.sh" "$NGINX_CONFIG_NAME" "$TEMP_NGINX_CONFIG"
 
 # Update or create the Docker service
@@ -183,7 +183,7 @@ sudo sh /srv/wso/deploy-service.sh myapp development
 The script will automatically:
 - Pull the image with the appropriate tag (e.g., `myapp:staging`, `myapp:production`)
 - Create/update the service with environment-specific name (e.g., `myapp-staging`, `myapp-production`)
-- Generate separate nginx configurations (e.g., `myapp-staging.conf.template`, `myapp-production.conf.template`)
+- Generate separate nginx configurations (e.g., `myapp-staging.conf`, `myapp-production.conf`)
 
 ### Remote Deployment
 
@@ -297,9 +297,9 @@ This approach ensures:
 
 ### Configuring Nginx
 
-1. Create an nginx configuration in `/srv/wso/nginx-templates/`:
+1. Create an nginx configuration in `/srv/wso/nginx-conf/`:
 ```nginx
-# Example: myapp.conf.template
+# Example: myapp.conf
 server {
     listen [::]:443 ssl;
     listen 443 ssl;
@@ -337,7 +337,7 @@ WSO provides reusable configuration snippets to avoid duplication:
 - **`ssl-common.conf`**: TLS protocols, ciphers, HSTS headers - included once per server block
 - **`proxy-common.conf`**: Proxy headers, timeouts, buffering, websocket support - included in each proxy location
 
-These files are automatically installed to `/srv/wso/nginx-templates/` and mounted into the nginx container at `/etc/nginx/conf.d/`. You can customize them to apply changes across all services.
+These files are automatically installed to `/srv/wso/nginx-conf/` and mounted into the nginx container at `/etc/nginx/conf.d/`. You can customize them to apply changes across all services.
 
 ### SSL Certificate Management
 
@@ -383,10 +383,10 @@ docker service create \
 
 The `sources/` directory contains templates and examples:
 
-- `sources/nginx/` - Nginx configuration templates
-  - `proxy.template` - Reverse proxy configuration example
-  - `ssl-common.conf.template` - Common SSL settings (TLS protocols, ciphers, HSTS)
-  - `proxy-common.conf.template` - Common proxy settings (headers, timeouts, buffering, websockets)
+- `sources/nginx/` - Nginx configuration files
+  - `proxy.conf` - Reverse proxy configuration example
+  - `ssl-common.conf` - Common SSL settings (TLS protocols, ciphers, HSTS)
+  - `proxy-common.conf` - Common proxy settings (headers, timeouts, buffering, websockets)
 - `sources/scripts/` - System management scripts
   - `deploy-service.sh` - Secure service deployment wrapper
   - `nginx-reload.sh` - Nginx configuration reload
@@ -426,7 +426,7 @@ docker service logs <service-name>
 ### Backup
 
 Important directories to backup:
-- `/srv/wso/nginx-templates/` - Nginx configurations
+- `/srv/wso/nginx-conf/` - Nginx configurations
 - `/srv/wso/services/` - Service deployment scripts
 - `/srv/wso/data/` - SSL certificates, databases, and runtime data
   - `/srv/wso/data/letsencrypt/` - SSL certificates (most critical)

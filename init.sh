@@ -137,7 +137,7 @@ log_info "Creating directory structure..."
 
 mkdir -p "$ROOT_DIR"
 mkdir -p "$ROOT_DIR/scripts"
-mkdir -p "$ROOT_DIR/nginx-templates"
+mkdir -p "$ROOT_DIR/nginx-conf"
 mkdir -p "$ROOT_DIR/static/default"
 mkdir -p "$ROOT_DIR/static/sites"
 mkdir -p "$ROOT_DIR/services"
@@ -208,10 +208,10 @@ copy_file "$SCRIPT_DIR/sources/scripts/certbot-renew.sh" "$ROOT_DIR/scripts/cert
 chmod +x "$ROOT_DIR/deploy-service.sh" 2>/dev/null || true
 chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
 
-# Copy nginx templates
-copy_file "$SCRIPT_DIR/sources/nginx/ssl-common.conf.template" "$ROOT_DIR/nginx-templates/ssl-common.conf.template" "ssl-common.conf.template"
-copy_file "$SCRIPT_DIR/sources/nginx/proxy-common.conf.template" "$ROOT_DIR/nginx-templates/proxy-common.conf.template" "proxy-common.conf.template"
-copy_file "$SCRIPT_DIR/sources/nginx/nginx-proxy.template" "$ROOT_DIR/nginx-templates/proxy.template" "nginx-proxy.template"
+# Copy nginx configuration files
+copy_file "$SCRIPT_DIR/sources/nginx/ssl-common.conf" "$ROOT_DIR/nginx-conf/ssl-common.conf" "ssl-common.conf"
+copy_file "$SCRIPT_DIR/sources/nginx/proxy-common.conf" "$ROOT_DIR/nginx-conf/proxy-common.conf" "proxy-common.conf"
+copy_file "$SCRIPT_DIR/sources/nginx/nginx-proxy.conf" "$ROOT_DIR/nginx-conf/proxy.conf" "nginx-proxy.conf"
 
 # Copy static files
 copy_file "$SCRIPT_DIR/sources/static/index.html" "$ROOT_DIR/static/default/index.html" "default index.html"
@@ -332,25 +332,60 @@ else
 fi
 
 ################################################################################
-# Create nginx service if not exists
+# Create or update nginx service
 ################################################################################
 log_info "Checking nginx service..."
 
+# Define nginx service configuration
+NGINX_IMAGE="nginx:1.29-alpine"
+NGINX_MOUNTS="
+  --mount type=bind,src=$ROOT_DIR/nginx-conf,dst=/etc/nginx/conf.d
+  --mount type=bind,src=$ROOT_DIR/static/default,dst=/usr/share/nginx/html
+  --mount type=bind,src=$ROOT_DIR/static/sites,dst=/usr/share/nginx/sites
+  --mount type=bind,src=$ROOT_DIR/data/letsencrypt,dst=/etc/letsencrypt
+"
+
 if docker service ls 2>/dev/null | grep -q "nginx"; then
     log_success "Nginx service already exists"
-    log_info "To update the nginx image, run:"
-    log_info "  docker service update --image nginx:1.29-alpine nginx"
+
+    # Get current nginx image
+    CURRENT_IMAGE=$(docker service inspect nginx --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' 2>/dev/null | cut -d@ -f1)
+
+    echo ""
+    echo "Current nginx image: $CURRENT_IMAGE"
+    echo "Target nginx image:  $NGINX_IMAGE"
+    echo ""
+
+    if [ "$CURRENT_IMAGE" != "$NGINX_IMAGE" ]; then
+        read -p "Do you want to update the nginx service to $NGINX_IMAGE? (y/N): " update_nginx
+
+        if [ "$update_nginx" = "y" ] || [ "$update_nginx" = "Y" ]; then
+            log_info "Updating nginx service image..."
+            docker service update --image "$NGINX_IMAGE" nginx
+            log_success "Nginx service updated to $NGINX_IMAGE"
+        else
+            log_info "Nginx service update skipped"
+        fi
+    else
+        log_info "Nginx service is already running the target image"
+    fi
+
+    echo ""
+    log_info "Note: Mount points are not updated for existing services."
+    log_info "If you changed ROOT_DIR, you may need to recreate the service:"
+    log_info "  docker service rm nginx"
+    log_info "  Then re-run this installation script"
 else
     log_info "Creating nginx service..."
 
     docker service create --mode global --name nginx \
       --publish mode=host,target=80,published=80 \
       --publish mode=host,target=443,published=443 \
-      --mount type=bind,src=$ROOT_DIR/nginx-templates,dst=/etc/nginx/templates \
+      --mount type=bind,src=$ROOT_DIR/nginx-conf,dst=/etc/nginx/conf.d \
       --mount type=bind,src=$ROOT_DIR/static/default,dst=/usr/share/nginx/html \
       --mount type=bind,src=$ROOT_DIR/static/sites,dst=/usr/share/nginx/sites \
       --mount type=bind,src=$ROOT_DIR/data/letsencrypt,dst=/etc/letsencrypt \
-      nginx:1.29-alpine
+      "$NGINX_IMAGE"
 
     log_success "Nginx service created"
 fi
@@ -369,7 +404,7 @@ log_info "Docker Swarm: active"
 log_info "Nginx service: running"
 echo ""
 log_info "Next steps:"
-echo "  1. Place your nginx configurations in: $ROOT_DIR/nginx-templates/"
+echo "  1. Place your nginx configurations in: $ROOT_DIR/nginx-conf/"
 echo "  2. Generate SSL certificates: $ROOT_DIR/scripts/certbot-gen.sh domain.com"
 echo "  3. Reload nginx: $ROOT_DIR/scripts/nginx-reload.sh"
 echo "  4. Deploy services: sudo sh $ROOT_DIR/deploy-service.sh <project-name>"

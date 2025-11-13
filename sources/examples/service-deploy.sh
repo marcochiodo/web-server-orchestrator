@@ -80,5 +80,5 @@ fi
 echo "================================"
 echo "Deployment of ${SERVICE_NAME} to ${ENVIRONMENT} completed successfully"
 echo "Service: ${DOCKER_SERVICE_NAME}"
-echo "Nginx config: ${NGINX_CONFIG_NAME}.conf.template"
+echo "Nginx config: ${NGINX_CONFIG_NAME}.conf"
 echo "================================"
