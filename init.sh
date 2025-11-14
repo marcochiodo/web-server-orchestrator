@@ -399,12 +399,16 @@ if docker service ls 2>/dev/null | grep -q "nginx"; then
     echo "Target nginx image:  $NGINX_IMAGE"
     echo ""
 
+    # Ensure nginx is connected to wso-net (idempotent)
+    log_info "Ensuring nginx is connected to wso-net..."
+    docker service update --network-add wso-net nginx >/dev/null 2>&1 || true
+
     if [ "$CURRENT_IMAGE" != "$NGINX_IMAGE" ]; then
         read -p "Do you want to update the nginx service to $NGINX_IMAGE? (y/N): " update_nginx
 
         if [ "$update_nginx" = "y" ] || [ "$update_nginx" = "Y" ]; then
             log_info "Updating nginx service image..."
-            docker service update --image "$NGINX_IMAGE" --network-add wso-net nginx
+            docker service update --image "$NGINX_IMAGE" nginx
             log_success "Nginx service updated to $NGINX_IMAGE"
         else
             log_info "Nginx service update skipped"
