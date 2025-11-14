@@ -67,7 +67,7 @@ echo "Installing new configuration: $TARGET_FILE"
 cp "$SOURCE_FILE" "$TARGET_FILE"
 
 # Get nginx container ID
-NGINX_CONTAINER=$(docker ps -q -f name=nginx.1 | head -n 1)
+NGINX_CONTAINER=$(docker ps -q -f name=nginx | head -n 1)
 
 if [ -z "$NGINX_CONTAINER" ]; then
     echo "Error: Nginx container not found. Is nginx service running?" >&2
