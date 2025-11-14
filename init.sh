@@ -133,43 +133,44 @@ fi
 ################################################################################
 log_info "Checking SSH configuration..."
 
-SSHD_CONFIG="/etc/ssh/sshd_config"
+WSO_SSH_CONFIG="/etc/ssh/sshd_config.d/999-wso.conf"
 
-# Check if PasswordAuthentication is explicitly disabled or not set
-if grep -q "^PasswordAuthentication no" "$SSHD_CONFIG" || ! grep -q "^PasswordAuthentication yes" "$SSHD_CONFIG"; then
+# Check if our configuration already exists and is correct
+if [ -f "$WSO_SSH_CONFIG" ] && grep -q "^PasswordAuthentication yes" "$WSO_SSH_CONFIG"; then
+    log_success "SSH password authentication is already enabled (via WSO config)"
+else
     echo ""
-    log_warning "SSH password authentication appears to be disabled or not configured."
-    log_info "This is common on Debian systems and will prevent the 'deployer' user from logging in via SSH with password."
+    log_warning "SSH password authentication may be disabled by cloud-init or other configurations."
+    log_info "This is common on Debian/cloud systems and will prevent the 'deployer' user from logging in via SSH with password."
     echo ""
     read -p "Do you want to enable SSH password authentication? [y/N]: " -n 1 -r
     echo
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        # Enable PasswordAuthentication
-        if grep -q "^PasswordAuthentication" "$SSHD_CONFIG"; then
-            sed -i 's/^PasswordAuthentication.*/PasswordAuthentication yes/' "$SSHD_CONFIG"
-        else
-            echo "PasswordAuthentication yes" >> "$SSHD_CONFIG"
-        fi
+        log_info "Creating WSO SSH configuration override..."
 
-        # Ensure PubkeyAuthentication is also enabled (best practice)
-        if ! grep -q "^PubkeyAuthentication yes" "$SSHD_CONFIG"; then
-            if grep -q "^PubkeyAuthentication" "$SSHD_CONFIG"; then
-                sed -i 's/^PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSHD_CONFIG"
-            else
-                echo "PubkeyAuthentication yes" >> "$SSHD_CONFIG"
-            fi
-        fi
+        # Create sshd_config.d directory if it doesn't exist
+        mkdir -p /etc/ssh/sshd_config.d
+
+        # Create WSO SSH configuration file (999 ensures it's loaded last and overrides others)
+        cat > "$WSO_SSH_CONFIG" <<EOF
+# WSO (Web Server Orchestrator) SSH Configuration
+# This file overrides previous SSH configurations to enable password authentication
+# for the deployer user and automated deployments.
+
+PasswordAuthentication yes
+PubkeyAuthentication yes
+EOF
+
+        chmod 644 "$WSO_SSH_CONFIG"
 
         log_info "Restarting SSH service..."
         systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
-        log_success "SSH password authentication enabled"
+        log_success "SSH password authentication enabled via $WSO_SSH_CONFIG"
     else
         log_info "SSH configuration unchanged. You can use SSH keys for authentication."
         log_info "To add SSH keys: ssh-copy-id deployer@your-server"
     fi
-else
-    log_success "SSH password authentication is already enabled"
 fi
 
 ################################################################################
