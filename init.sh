@@ -129,6 +129,50 @@ else
 fi
 
 ################################################################################
+# Check SSH password authentication configuration
+################################################################################
+log_info "Checking SSH configuration..."
+
+SSHD_CONFIG="/etc/ssh/sshd_config"
+
+# Check if PasswordAuthentication is explicitly disabled or not set
+if grep -q "^PasswordAuthentication no" "$SSHD_CONFIG" || ! grep -q "^PasswordAuthentication yes" "$SSHD_CONFIG"; then
+    echo ""
+    log_warning "SSH password authentication appears to be disabled or not configured."
+    log_info "This is common on Debian systems and will prevent the 'deployer' user from logging in via SSH with password."
+    echo ""
+    read -p "Do you want to enable SSH password authentication? [y/N]: " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # Enable PasswordAuthentication
+        if grep -q "^PasswordAuthentication" "$SSHD_CONFIG"; then
+            sed -i 's/^PasswordAuthentication.*/PasswordAuthentication yes/' "$SSHD_CONFIG"
+        else
+            echo "PasswordAuthentication yes" >> "$SSHD_CONFIG"
+        fi
+
+        # Ensure PubkeyAuthentication is also enabled (best practice)
+        if ! grep -q "^PubkeyAuthentication yes" "$SSHD_CONFIG"; then
+            if grep -q "^PubkeyAuthentication" "$SSHD_CONFIG"; then
+                sed -i 's/^PubkeyAuthentication.*/PubkeyAuthentication yes/' "$SSHD_CONFIG"
+            else
+                echo "PubkeyAuthentication yes" >> "$SSHD_CONFIG"
+            fi
+        fi
+
+        log_info "Restarting SSH service..."
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
+        log_success "SSH password authentication enabled"
+    else
+        log_info "SSH configuration unchanged. You can use SSH keys for authentication."
+        log_info "To add SSH keys: ssh-copy-id deployer@your-server"
+    fi
+else
+    log_success "SSH password authentication is already enabled"
+fi
+
+################################################################################
 # Create directory structure
 ################################################################################
 log_info "Creating directory structure..."
