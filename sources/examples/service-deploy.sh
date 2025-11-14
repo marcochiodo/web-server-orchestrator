@@ -70,7 +70,7 @@ else
     docker service create \
         --with-registry-auth \
         --name "$DOCKER_SERVICE_NAME" \
-        --network ingress \
+        --network wso-net \
         --env DATABASE_URL="file:/data/sqlite/${SERVICE_NAME}.db" \
         --mount type=bind,source="$ROOT_DIR/data/sqlite",target=/data/sqlite \
         --mount type=bind,source="$ROOT_DIR/data/assets/${SERVICE_NAME}",target=/data/assets \

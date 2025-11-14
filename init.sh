@@ -362,6 +362,19 @@ else
 fi
 
 ################################################################################
+# Create overlay network for service communication
+################################################################################
+log_info "Checking overlay network..."
+
+if docker network ls | grep -q "wso-net"; then
+    log_success "Overlay network 'wso-net' already exists"
+else
+    log_info "Creating overlay network 'wso-net'..."
+    docker network create --driver overlay --attachable wso-net
+    log_success "Overlay network 'wso-net' created"
+fi
+
+################################################################################
 # Create or update nginx service
 ################################################################################
 log_info "Checking nginx service..."
@@ -391,7 +404,7 @@ if docker service ls 2>/dev/null | grep -q "nginx"; then
 
         if [ "$update_nginx" = "y" ] || [ "$update_nginx" = "Y" ]; then
             log_info "Updating nginx service image..."
-            docker service update --image "$NGINX_IMAGE" nginx
+            docker service update --image "$NGINX_IMAGE" --network-add wso-net nginx
             log_success "Nginx service updated to $NGINX_IMAGE"
         else
             log_info "Nginx service update skipped"
@@ -409,6 +422,7 @@ else
     log_info "Creating nginx service..."
 
     docker service create --mode global --name nginx \
+      --network wso-net \
       --publish mode=host,target=80,published=80 \
       --publish mode=host,target=443,published=443 \
       --mount type=bind,src=$ROOT_DIR/nginx-conf,dst=/etc/nginx/conf.d \

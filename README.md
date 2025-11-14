@@ -19,20 +19,23 @@ Moral support from [1C3](https://github.com/1C3).
 
 WSO orchestrates containerized web services using Docker Swarm, with a globally deployed nginx container acting as a reverse proxy. Each service runs in its own container, and nginx configurations are dynamically mounted, allowing for hot-reloading without service interruption.
 
+All services communicate through a dedicated overlay network (`wso-net`) that enables service discovery by name. Nginx is the only service with published ports (80/443), while application services remain internal and accessible only through the reverse proxy.
+
 ```
 ┌─────────────────────────────────────────────┐
 │              Docker Swarm                   │
 │                                             │
 │  ┌────────────────────────────────────┐     │
 │  │  Nginx (Global Service)            │     │
-│  │  - Port 80/443                     │     │
+│  │  - Port 80/443 (Published)         │     │
 │  │  - SSL Termination                 │     │
 │  │  - Reverse Proxy                   │     │
 │  └─────────┬──────────────────────────┘     │
-│            │                                │
+│            │ wso-net (overlay)              │
 │  ┌─────────▼─────────┐  ┌──────────────┐    │
 │  │  Service A        │  │  Service B   │    │
 │  │  (Your App)       │  │  (Your App)  │    │
+│  │  No public ports  │  │  No public   │    │
 │  └───────────────────┘  └──────────────┘    │
 └─────────────────────────────────────────────┘
 ```
@@ -154,7 +157,7 @@ else
     docker service create \
         --with-registry-auth \
         --name "$DOCKER_SERVICE_NAME" \
-        --network ingress \
+        --network wso-net \
         "$IMAGE_NAME"
 fi
 ```
@@ -396,7 +399,7 @@ docker service create \
   --with-registry-auth \
   --name myapp-prod \
   --env DATABASE_URL="postgres://..." \
-  --network ingress \
+  --network wso-net \
   registry.example.com/myapp:latest
 ```
 
