@@ -248,6 +248,24 @@ ssh-copy-id deployer@your-server.com
 
 Store the private key as a secret in your CI/CD system for fully automated deployments.
 
+For GitHub Actions, you'll also need to add the server's SSH fingerprint to known_hosts. It's recommended to use ed25519 for consistency:
+
+```bash
+# Get server fingerprint with ed25519
+ssh-keyscan -t ed25519 your-server.com
+```
+
+Then in your GitHub Action workflow:
+
+```yaml
+- name: Add known hosts
+  run: |
+    mkdir -p $HOME/.ssh
+    echo "${{ vars.SSH_KNOWN_HOSTS }}" > $HOME/.ssh/known_hosts
+```
+
+Store the fingerprint output in a GitHub repository variable named `SSH_KNOWN_HOSTS`.
+
 **Security Note:**
 The `deployer` user has minimal privileges by design. It can only execute the `deploy-service.sh` wrapper script via sudo, which validates and runs service-specific deployment scripts. This architecture prevents unauthorized system modifications while enabling safe automated deployments.
 
