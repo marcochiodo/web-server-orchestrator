@@ -131,42 +131,29 @@ fi
 ################################################################################
 # Check SSH password authentication configuration
 ################################################################################
-log_info "Checking SSH configuration..."
+log_info "Checking SSH password authentication..."
 
-WSO_SSH_CONFIG="/etc/ssh/sshd_config.d/10-wso.conf"
-
-# Check if our configuration already exists and is correct
-if [ -f "$WSO_SSH_CONFIG" ] && grep -q "^PasswordAuthentication yes" "$WSO_SSH_CONFIG"; then
-    log_success "SSH password authentication is already enabled (via WSO config)"
+# Check current SSH configuration
+if sshd -T 2>/dev/null | grep -q "^passwordauthentication yes"; then
+    log_success "SSH password authentication is already enabled"
 else
     echo ""
-    log_warning "SSH password authentication may be disabled by cloud-init or other configurations."
+    log_warning "SSH password authentication is currently disabled."
     log_info "This is common on Debian/cloud systems and will prevent the 'deployer' user from logging in via SSH with password."
     echo ""
     read -p "Do you want to enable SSH password authentication? [y/N]: " -n 1 -r
     echo
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Creating WSO SSH configuration override..."
-
         # Create sshd_config.d directory if it doesn't exist
         mkdir -p /etc/ssh/sshd_config.d
 
-        # Create WSO SSH configuration file (10 ensures it's loaded early and takes precedence)
-        cat > "$WSO_SSH_CONFIG" <<EOF
-# WSO (Web Server Orchestrator) SSH Configuration
-# This file enables password authentication for the deployer user and automated deployments.
-# It has priority over cloud-init and other configurations due to its lower number (10).
-
-PasswordAuthentication yes
-PubkeyAuthentication yes
-EOF
-
-        chmod 644 "$WSO_SSH_CONFIG"
+        # Copy WSO SSH configuration file
+        copy_file "$SCRIPT_DIR/sources/ssh/10-wso.conf" "/etc/ssh/sshd_config.d/10-wso.conf" "WSO SSH configuration"
 
         log_info "Restarting SSH service..."
         systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
-        log_success "SSH password authentication enabled via $WSO_SSH_CONFIG"
+        log_success "SSH password authentication enabled"
     else
         log_info "SSH configuration unchanged. You can use SSH keys for authentication."
         log_info "To add SSH keys: ssh-copy-id deployer@your-server"
