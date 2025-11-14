@@ -94,16 +94,14 @@ PACKAGES="rsync sqlite3 ca-certificates curl docker.io docker-compose"
 log_info "Installing: $PACKAGES"
 apt install -y $PACKAGES
 
-# Check if snap is available for aws-cli
-if command -v snap &> /dev/null; then
-    if ! snap list | grep -q aws-cli; then
-        log_info "Installing aws-cli via snap..."
-        snap install aws-cli --classic
-    else
-        log_success "aws-cli already installed"
-    fi
+# Install MinIO Client (mc) for S3 backup
+if command -v mc &> /dev/null; then
+    log_success "MinIO client already installed"
 else
-    log_warning "snap not available, skipping aws-cli installation"
+    log_info "Installing MinIO client (mc)..."
+    curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+    chmod +x /usr/local/bin/mc
+    log_success "MinIO client installed"
 fi
 
 # Ensure Docker service is running
