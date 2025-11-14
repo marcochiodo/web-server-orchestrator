@@ -2,6 +2,9 @@
 
 A streamlined Docker Swarm-based web server orchestration system designed for managing multiple web services behind an nginx reverse proxy with automated SSL certificate management.
 
+Technical support from Claude Code.
+Moral support from [1C3](https://github.com/1C3).
+
 ## Features
 
 - **Docker Swarm Integration**: Leverage Docker Swarm's native orchestration capabilities
