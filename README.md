@@ -18,18 +18,18 @@ WSO orchestrates containerized web services using Docker Swarm, with a globally 
 
 ```
 ┌─────────────────────────────────────────────┐
-│              Docker Swarm                    │
-│                                              │
+│              Docker Swarm                   │
+│                                             │
 │  ┌────────────────────────────────────┐     │
 │  │  Nginx (Global Service)            │     │
 │  │  - Port 80/443                     │     │
 │  │  - SSL Termination                 │     │
 │  │  - Reverse Proxy                   │     │
 │  └─────────┬──────────────────────────┘     │
-│            │                                 │
-│  ┌─────────▼─────────┐  ┌──────────────┐   │
-│  │  Service A        │  │  Service B    │   │
-│  │  (Your App)       │  │  (Your App)   │   │
+│            │                                │
+│  ┌─────────▼─────────┐  ┌──────────────┐    │
+│  │  Service A        │  │  Service B   │    │
+│  │  (Your App)       │  │  (Your App)  │    │
 │  └───────────────────┘  └──────────────┘    │
 └─────────────────────────────────────────────┘
 ```
