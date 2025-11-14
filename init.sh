@@ -133,7 +133,7 @@ fi
 ################################################################################
 log_info "Checking SSH configuration..."
 
-WSO_SSH_CONFIG="/etc/ssh/sshd_config.d/999-wso.conf"
+WSO_SSH_CONFIG="/etc/ssh/sshd_config.d/10-wso.conf"
 
 # Check if our configuration already exists and is correct
 if [ -f "$WSO_SSH_CONFIG" ] && grep -q "^PasswordAuthentication yes" "$WSO_SSH_CONFIG"; then
@@ -152,11 +152,11 @@ else
         # Create sshd_config.d directory if it doesn't exist
         mkdir -p /etc/ssh/sshd_config.d
 
-        # Create WSO SSH configuration file (999 ensures it's loaded last and overrides others)
+        # Create WSO SSH configuration file (10 ensures it's loaded early and takes precedence)
         cat > "$WSO_SSH_CONFIG" <<EOF
 # WSO (Web Server Orchestrator) SSH Configuration
-# This file overrides previous SSH configurations to enable password authentication
-# for the deployer user and automated deployments.
+# This file enables password authentication for the deployer user and automated deployments.
+# It has priority over cloud-init and other configurations due to its lower number (10).
 
 PasswordAuthentication yes
 PubkeyAuthentication yes
