@@ -209,7 +209,6 @@ chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
 # Copy nginx configuration files
 copy_file "$SCRIPT_DIR/sources/nginx/ssl-common.conf" "$ROOT_DIR/nginx-conf/ssl-common.conf" "ssl-common.conf"
 copy_file "$SCRIPT_DIR/sources/nginx/proxy-common.conf" "$ROOT_DIR/nginx-conf/proxy-common.conf" "proxy-common.conf"
-copy_file "$SCRIPT_DIR/sources/nginx/nginx-proxy.conf" "$ROOT_DIR/nginx-conf/proxy.conf" "nginx-proxy.conf"
 
 # Copy static files
 copy_file "$SCRIPT_DIR/sources/static/index.html" "$ROOT_DIR/static/default/index.html" "default index.html"
