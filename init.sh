@@ -209,6 +209,7 @@ chmod +x "$ROOT_DIR/deploy-service.sh" 2>/dev/null || true
 chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
 
 # Copy nginx configuration files
+copy_file "$SCRIPT_DIR/sources/nginx/default.conf" "$ROOT_DIR/nginx-conf/default.conf" "default.conf"
 copy_file "$SCRIPT_DIR/sources/nginx/ssl-common.conf" "$ROOT_DIR/nginx-conf/ssl-common.conf" "ssl-common.conf"
 copy_file "$SCRIPT_DIR/sources/nginx/proxy-common.conf" "$ROOT_DIR/nginx-conf/proxy-common.conf" "proxy-common.conf"
 

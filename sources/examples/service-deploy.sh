@@ -29,6 +29,7 @@ DOCKER_SERVICE_NAME="${SERVICE_NAME}-${ENVIRONMENT}"
 NGINX_CONFIG_NAME="${SERVICE_NAME}-${ENVIRONMENT}"
 ROOT_DIR="${ROOT_DIR:-/srv/wso}"
 TEMP_NGINX_CONFIG="/tmp/${SERVICE_NAME}-${ENVIRONMENT}-nginx-$$.conf"
+TEMP_DOCKER_SERVICE_NAME="${SERVICE_NAME}-${ENVIRONMENT}-tmp-$$"
 
 # Cleanup on exit
 cleanup() {
@@ -50,14 +51,19 @@ docker pull "$IMAGE_NAME"
 # - /app/nginx-staging.conf
 # - /app/nginx-development.conf
 echo "Extracting nginx configuration from image..."
-docker run --rm "$IMAGE_NAME" cat "/app/nginx-${ENVIRONMENT}.conf" > "$TEMP_NGINX_CONFIG"
 
-# Update nginx configuration
-echo "Updating nginx configuration for ${SERVICE_NAME}-${ENVIRONMENT}..."
-sh "$ROOT_DIR/scripts/update-nginx-config.sh" "$NGINX_CONFIG_NAME" "$TEMP_NGINX_CONFIG"
+docker run --rm -d --name ${TEMP_DOCKER_SERVICE_NAME} "$IMAGE_NAME"
+docker cp ${TEMP_DOCKER_SERVICE_NAME}:/app/nginx-${ENVIRONMENT}.conf "$TEMP_NGINX_CONFIG"
+docker stop ${TEMP_DOCKER_SERVICE_NAME}
+
 
 # Check if service exists
 if docker service ls --format '{{.Name}}' | grep -q "^${DOCKER_SERVICE_NAME}$"; then
+
+    # Update nginx configuration
+    echo "Updating nginx configuration for ${SERVICE_NAME}-${ENVIRONMENT}..."
+    sh "$ROOT_DIR/scripts/update-nginx-config.sh" "$NGINX_CONFIG_NAME" "$TEMP_NGINX_CONFIG"
+
     # Update existing service
     echo "Updating existing service: $DOCKER_SERVICE_NAME"
     docker service update \
@@ -75,6 +81,10 @@ else
         --mount type=bind,source="$ROOT_DIR/data/sqlite",target=/data/sqlite \
         --mount type=bind,source="$ROOT_DIR/data/assets/${SERVICE_NAME}",target=/data/assets \
         "$IMAGE_NAME"
+
+    # Create nginx configuration ( service must be running otherwise the nginx test fails )
+    echo "Updating nginx configuration for ${SERVICE_NAME}-${ENVIRONMENT}..."
+    sh "$ROOT_DIR/scripts/update-nginx-config.sh" "$NGINX_CONFIG_NAME" "$TEMP_NGINX_CONFIG"
 fi
 
 echo "================================"
