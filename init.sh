@@ -140,10 +140,6 @@ mkdir -p "$ROOT_DIR/static/default"
 mkdir -p "$ROOT_DIR/static/sites"
 mkdir -p "$ROOT_DIR/services"
 
-log_info "Setting permissions 755 for $ROOT_DIR/static/default..."
-
-chmod -R 755 "$ROOT_DIR/static/default"
-
 # Data directory for runtime data (certificates, databases, assets)
 mkdir -p "$ROOT_DIR/data/letsencrypt"
 mkdir -p "$ROOT_DIR/data/letsencrypt-lib"
@@ -319,6 +315,9 @@ fi
 ################################################################################
 log_info "Setting permissions on /srv..."
 chmod -R o-rwx /srv 2>/dev/null || true
+
+log_info "Setting permissions 755 for $ROOT_DIR/static..."
+chmod -R 755 "$ROOT_DIR/static"
 log_success "Permissions set"
 
 ################################################################################
