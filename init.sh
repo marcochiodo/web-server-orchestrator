@@ -321,31 +321,37 @@ log_success "Permissions set"
 ################################################################################
 echo ""
 log_info "Docker registry configuration"
-read -p "Do you want to login to a Docker registry? [y/N]: " -n 1 -r
-echo
 
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    read -p "Use custom registry endpoint? [y/N]: " -n 1 -r
+# Check if Docker credentials already exist
+if [ -f ~/.docker/config.json ] && grep -q '"auths"' ~/.docker/config.json 2>/dev/null; then
+    log_success "Docker registry credentials already configured"
+else
+    read -p "Do you want to login to a Docker registry? [y/N]: " -n 1 -r
     echo
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        read -p "Registry URL: " REGISTRY_URL
-        read -p "Username: " REGISTRY_USER
-        read -sp "Password: " REGISTRY_PASS
+        read -p "Use custom registry endpoint? [y/N]: " -n 1 -r
         echo
 
-        echo "$REGISTRY_PASS" | docker login "$REGISTRY_URL" -u "$REGISTRY_USER" --password-stdin
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            read -p "Registry URL: " REGISTRY_URL
+            read -p "Username: " REGISTRY_USER
+            read -sp "Password: " REGISTRY_PASS
+            echo
+
+            echo "$REGISTRY_PASS" | docker login "$REGISTRY_URL" -u "$REGISTRY_USER" --password-stdin
+        else
+            read -p "Docker Hub username: " REGISTRY_USER
+            read -sp "Docker Hub password: " REGISTRY_PASS
+            echo
+
+            echo "$REGISTRY_PASS" | docker login -u "$REGISTRY_USER" --password-stdin
+        fi
+
+        log_success "Docker registry login successful"
     else
-        read -p "Docker Hub username: " REGISTRY_USER
-        read -sp "Docker Hub password: " REGISTRY_PASS
-        echo
-
-        echo "$REGISTRY_PASS" | docker login -u "$REGISTRY_USER" --password-stdin
+        log_info "Skipping Docker registry login"
     fi
-
-    log_success "Docker registry login successful"
-else
-    log_info "Skipping Docker registry login"
 fi
 
 ################################################################################
