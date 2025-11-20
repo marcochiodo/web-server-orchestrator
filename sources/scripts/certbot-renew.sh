@@ -11,11 +11,11 @@ else
 fi
 
 # Ensure secrets directory exists
-mkdir -p "$ROOT_DIR/secrets/certbot"
+mkdir -p "$ROOT_DIR/data/secrets/certbot"
 
 sudo docker run -it --rm --name certbot \
   -v "$ROOT_DIR/data/letsencrypt:/etc/letsencrypt" \
   -v "$ROOT_DIR/data/letsencrypt-lib:/var/lib/letsencrypt" \
   -v "$ROOT_DIR/static/default:/srv/webroot" \
-  -v "$ROOT_DIR/secrets/certbot:/secrets/certbot:ro" \
+  -v "$ROOT_DIR/data/secrets/certbot:/secrets/certbot:ro" \
   certbot/dns-ovh renew
