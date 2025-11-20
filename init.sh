@@ -146,6 +146,9 @@ mkdir -p "$ROOT_DIR/data/letsencrypt-lib"
 mkdir -p "$ROOT_DIR/data/sqlite"
 mkdir -p "$ROOT_DIR/data/assets"
 
+# Secrets directory for sensitive data (API credentials, etc.)
+mkdir -p "$ROOT_DIR/secrets/certbot"
+
 log_success "Directory structure created"
 
 ################################################################################
@@ -435,6 +438,111 @@ else
       "$NGINX_IMAGE"
 
     log_success "Nginx service created"
+fi
+
+################################################################################
+# Configure OVH DNS wildcard certificate for chdev.eu (optional)
+################################################################################
+echo ""
+log_info "Wildcard DNS Certificate Configuration"
+echo ""
+log_info "You can configure a wildcard certificate for *.chdev.eu using OVH DNS API."
+log_info "This requires OVH API credentials (application key, application secret, consumer key)."
+log_info "Get credentials from: https://eu.api.ovh.com/createToken/ (or .ca for North America)"
+echo ""
+read -p "Do you want to configure OVH DNS wildcard certificate for chdev.eu? [y/N]: " -n 1 -r
+echo
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    log_info "Configuring OVH DNS wildcard certificate..."
+
+    # Ask for OVH endpoint
+    echo ""
+    log_info "Select OVH endpoint:"
+    echo "  1) ovh-eu (Europe)"
+    echo "  2) ovh-ca (North America)"
+    read -p "Enter choice [1]: " ovh_endpoint_choice
+    ovh_endpoint_choice=${ovh_endpoint_choice:-1}
+
+    case "$ovh_endpoint_choice" in
+        1)
+            OVH_ENDPOINT="ovh-eu"
+            ;;
+        2)
+            OVH_ENDPOINT="ovh-ca"
+            ;;
+        *)
+            log_error "Invalid choice. Defaulting to ovh-eu"
+            OVH_ENDPOINT="ovh-eu"
+            ;;
+    esac
+
+    log_info "Using endpoint: $OVH_ENDPOINT"
+
+    # Ask for OVH credentials
+    echo ""
+    log_info "Enter OVH API credentials:"
+    read -p "Application Key: " OVH_APP_KEY
+    read -p "Application Secret: " OVH_APP_SECRET
+    read -p "Consumer Key: " OVH_CONSUMER_KEY
+
+    # Validate that credentials are not empty
+    if [ -z "$OVH_APP_KEY" ] || [ -z "$OVH_APP_SECRET" ] || [ -z "$OVH_CONSUMER_KEY" ]; then
+        log_error "All credentials are required. Skipping wildcard certificate configuration."
+    else
+        # Create secrets directory structure
+        log_info "Creating secrets directory..."
+        mkdir -p "$ROOT_DIR/secrets/certbot"
+
+        # Create ovh.ini file
+        OVH_INI_FILE="$ROOT_DIR/secrets/certbot/ovh.ini"
+        cat > "$OVH_INI_FILE" <<EOF
+# OVH API credentials for certbot-dns-ovh
+dns_ovh_endpoint = $OVH_ENDPOINT
+dns_ovh_application_key = $OVH_APP_KEY
+dns_ovh_application_secret = $OVH_APP_SECRET
+dns_ovh_consumer_key = $OVH_CONSUMER_KEY
+EOF
+
+        # Set secure permissions (600)
+        chmod 600 "$OVH_INI_FILE"
+        log_success "Created OVH credentials file: $OVH_INI_FILE"
+
+        # Generate wildcard certificate
+        echo ""
+        log_info "Generating wildcard certificate for *.chdev.eu and chdev.eu..."
+        log_warning "This will make DNS changes and may take a few minutes..."
+        echo ""
+
+        if docker run -it --rm --name certbot-ovh \
+            -v "$ROOT_DIR/data/letsencrypt:/etc/letsencrypt" \
+            -v "$ROOT_DIR/data/letsencrypt-lib:/var/lib/letsencrypt" \
+            -v "$ROOT_DIR/secrets/certbot:/secrets/certbot:ro" \
+            certbot/dns-ovh certonly \
+            --dns-ovh \
+            --dns-ovh-credentials /secrets/certbot/ovh.ini \
+            -d "chdev.eu" \
+            -d "*.chdev.eu" \
+            --agree-tos \
+            --non-interactive \
+            --email "$OVH_APP_KEY@temp.chdev.eu" 2>/dev/null; then
+
+            log_success "Wildcard certificate generated successfully!"
+        else
+            log_warning "Certificate generation failed or was cancelled."
+            log_info "You can generate it later using:"
+            echo "  docker run -it --rm --name certbot-ovh \\"
+            echo "    -v $ROOT_DIR/data/letsencrypt:/etc/letsencrypt \\"
+            echo "    -v $ROOT_DIR/data/letsencrypt-lib:/var/lib/letsencrypt \\"
+            echo "    -v $ROOT_DIR/secrets/certbot:/secrets/certbot:ro \\"
+            echo "    certbot/dns-ovh certonly \\"
+            echo "    --dns-ovh \\"
+            echo "    --dns-ovh-credentials /secrets/certbot/ovh.ini \\"
+            echo "    -d 'chdev.eu' -d '*.chdev.eu'"
+        fi
+    fi
+else
+    log_info "Skipping OVH DNS wildcard certificate configuration"
 fi
 
 ################################################################################
