@@ -6,7 +6,7 @@
 #
 # Protocol:
 #   1. Parent validates project name and environment
-#   2. Parent sources this script passing environment as $1
+#   2. Parent sets WSO_ENVIRONMENT and sources this script
 #   3. This script sets WSO_* configuration variables
 #   4. Parent validates variables and executes deployment
 #
@@ -25,9 +25,9 @@
 set -eu
 
 # =============================================================================
-# Get environment from argument (validated by parent)
+# Get environment from WSO_ENVIRONMENT (set by parent)
 # =============================================================================
-ENVIRONMENT="$1"
+ENVIRONMENT="$WSO_ENVIRONMENT"
 
 # =============================================================================
 # Project Configuration

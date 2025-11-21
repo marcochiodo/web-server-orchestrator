@@ -255,8 +255,8 @@ WSO provides a managed deployment system that uses a clean configuration protoco
 
 1. Create a deployment configuration script in `/srv/wso/services/<project>/deploy.sh`
 2. Call the wrapper: `sh /srv/wso/deploy-service.sh <project> <environment>`
-3. The wrapper validates inputs and sources your configuration script
-4. Your script sets `WSO_*` configuration variables
+3. The wrapper validates inputs, sets `WSO_ENVIRONMENT`, and sources your configuration script
+4. Your script reads `WSO_ENVIRONMENT` and sets `WSO_*` configuration variables
 5. The wrapper validates variables and executes the deployment
 6. No code duplication - all deployment logic is centralized
 
@@ -284,8 +284,8 @@ See `examples/service-deploy.sh` for a complete template. Here's a minimal examp
 #!/bin/sh
 set -eu
 
-# Environment is passed as $1 (already validated by parent)
-ENVIRONMENT="$1"
+# Environment is set by parent in WSO_ENVIRONMENT (already validated)
+ENVIRONMENT="$WSO_ENVIRONMENT"
 
 # WSO Configuration Variables
 WSO_SERVICE_NAME="myapp-${ENVIRONMENT}"
@@ -316,7 +316,7 @@ Both `<project>` and `<environment>` arguments are required. The environment mus
 
 1. Determines `ROOT_DIR` from script location (portable)
 2. Validates project name and environment format
-3. Sources your configuration script passing validated environment
+3. Sets `WSO_ENVIRONMENT` and sources your configuration script
 4. Validates all required `WSO_*` variables are set
 5. Pulls the Docker image
 6. Extracts nginx config and stack compose from the image

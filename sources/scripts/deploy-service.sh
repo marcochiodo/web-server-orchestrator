@@ -50,7 +50,8 @@ if [ ! -f "$target" ]; then
 fi
 
 echo "Loading configuration from: $target"
-. "$target" "$environment" "$@"
+export WSO_ENVIRONMENT="$environment"
+. "$target"
 
 # Validate required WSO_* variables
 for var in WSO_SERVICE_NAME WSO_IMAGE_NAME WSO_NGINX_CONFIG_PATH WSO_STACK_COMPOSE_PATH; do
