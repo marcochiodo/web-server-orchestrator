@@ -87,24 +87,37 @@ echo "========================================"
 echo "Pulling image..."
 docker pull "$IMAGE_NAME" || exit 1
 
-# Start temporary container
+# Start temporary container (no sleep - some images don't have it)
 echo "Starting temporary container..."
-docker run --rm --name "$TEMP_CONTAINER" -d "$IMAGE_NAME" sleep 30 2>/dev/null || exit 1
+docker run --rm --name "$TEMP_CONTAINER" -d "$IMAGE_NAME" 2>/dev/null || exit 1
 
 # Extract files from container
+HAS_STACK_COMPOSE=false
+HAS_NGINX_CONFIG=false
+
 echo "Extracting stack compose..."
-if ! docker cp "${TEMP_CONTAINER}:${STACK_COMPOSE_PATH}" "$TEMP_STACK_COMPOSE" 2>/dev/null; then
+if docker cp "${TEMP_CONTAINER}:${STACK_COMPOSE_PATH}" "$TEMP_STACK_COMPOSE" 2>/dev/null; then
+    HAS_STACK_COMPOSE=true
+fi
+
+echo "Extracting nginx config..."
+if docker cp "${TEMP_CONTAINER}:${NGINX_CONFIG_PATH}" "$TEMP_NGINX_CONFIG" 2>/dev/null; then
+    HAS_NGINX_CONFIG=true
+fi
+
+# Stop container if still running
+docker stop "$TEMP_CONTAINER" >/dev/null 2>&1 || true
+
+# Validate extracted files
+if [ "$HAS_STACK_COMPOSE" = false ]; then
     echo "Error: Stack compose not found at ${STACK_COMPOSE_PATH}" >&2
     exit 1
 fi
 
-echo "Extracting nginx config..."
-if ! docker cp "${TEMP_CONTAINER}:${NGINX_CONFIG_PATH}" "$TEMP_NGINX_CONFIG" 2>/dev/null; then
+if [ "$HAS_NGINX_CONFIG" = false ]; then
     echo "Error: Nginx config not found at ${NGINX_CONFIG_PATH}" >&2
     exit 1
 fi
-
-docker stop "$TEMP_CONTAINER" >/dev/null 2>&1
 
 # Check if stack exists
 STACK_EXISTS=false
