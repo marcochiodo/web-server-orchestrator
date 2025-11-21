@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:1.29-alpine
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: host
+    volumes:
+      - type: bind
+        source: ${ROOT_DIR}/nginx-conf
+        target: /etc/nginx/conf.d
+      - type: bind
+        source: ${ROOT_DIR}/static/default
+        target: /usr/share/nginx/html
+      - type: bind
+        source: ${ROOT_DIR}/static/sites
+        target: /usr/share/nginx/sites
+      - type: bind
+        source: ${ROOT_DIR}/data/letsencrypt
+        target: /etc/letsencrypt
+    networks:
+      - wso-net
+
+networks:
+  wso-net:
+    external: true
+    name: wso-net

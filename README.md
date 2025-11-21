@@ -21,6 +21,23 @@ WSO orchestrates containerized web services using Docker Swarm, with a globally 
 
 All services communicate through a dedicated overlay network (`wso-net`) that enables service discovery by name. Nginx is the only service with published ports (80/443), while application services remain internal and accessible only through the reverse proxy.
 
+### Deployment Approaches
+
+WSO supports two deployment approaches:
+
+**Declarative (Recommended):** Use Docker Compose files with `docker stack deploy`. This provides:
+- Version-controlled service configurations
+- Easy updates by redeploying the stack
+- Clear service definitions in YAML format
+- Better maintainability and reproducibility
+
+**Imperative (Legacy):** Use shell scripts with `docker service create/update` commands. This is still supported for:
+- Complex deployment workflows
+- Extracting configurations from Docker images
+- Backward compatibility with existing deployments
+
+The declarative approach is recommended for new deployments.
+
 ```
 ┌─────────────────────────────────────────────┐
 │              Docker Swarm                   │
@@ -109,136 +126,190 @@ After installation, your WSO instance will be ready at the configured directory 
 
 ### Deploying a Service
 
-1. Create a directory for your service:
-```bash
-mkdir -p /srv/wso/services/myapp
+WSO uses a declarative approach with Docker Stack templates and `docker stack deploy`. Variable substitution is handled using `docker stack config` as a preprocessor, which allows using a single template for all environments.
+
+#### The Template Philosophy
+
+**Key Concept:** One `stack-template.yml` for all environments (production, staging, development).
+
+The template contains variables like `${IMAGE_TAG}` and `${ROOT_DIR}` that get interpolated at deployment time. This means:
+- ✅ Same template file committed to git
+- ✅ Different configurations per environment via variables
+- ✅ No need for docker-compose dependency
+- ✅ Native Docker Swarm tooling
+
+#### Quick Start
+
+1. Create a `stack-template.yml` file for your service (see `examples/stack-template.yml` for a complete template):
+
+```yaml
+version: '3.8'
+
+services:
+  webapp:
+    # Use variables for environment-specific values
+    # Note: Service will be named STACKNAME_webapp (e.g., myapp_webapp)
+    image: my.registry.com/myapp:${IMAGE_TAG:-latest}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      - DATABASE_URL=file:/data/sqlite/myapp.db
+    volumes:
+      - type: bind
+        source: ${ROOT_DIR}/data/sqlite
+        target: /data/sqlite
+      - type: bind
+        source: ${ROOT_DIR}/data/assets/myapp
+        target: /data/assets
+    networks:
+      - wso-net
+
+networks:
+  wso-net:
+    external: true
+    name: wso-net
 ```
 
-2. Create a `deploy.sh` script. A complete example that supports multiple environments:
+2. Deploy using `docker stack config` to interpolate variables:
+
 ```bash
-#!/bin/sh
-# Example deployment script with nginx configuration updates
-# Usage: ./deploy.sh [environment]
-set -eu
+# Production deployment
+IMAGE_TAG=production ROOT_DIR=/srv/wso docker stack config -c stack-template.yml | docker stack deploy --compose-file - myapp
 
-# Get environment from argument (default: production)
-ENVIRONMENT="${1:-production}"
+# Staging deployment
+IMAGE_TAG=staging ROOT_DIR=/srv/wso docker stack config -c stack-template.yml | docker stack deploy --compose-file - myapp
 
-# Configuration
-SERVICE_NAME="myapp"
-IMAGE_NAME="registry.example.com/myapp:${ENVIRONMENT}"
-DOCKER_SERVICE_NAME="${SERVICE_NAME}-${ENVIRONMENT}"
-NGINX_CONFIG_NAME="${SERVICE_NAME}-${ENVIRONMENT}"
-ROOT_DIR="${ROOT_DIR:-/srv/wso}"
-TEMP_NGINX_CONFIG="/tmp/${SERVICE_NAME}-${ENVIRONMENT}-nginx-$$.conf"
+# Development deployment
+IMAGE_TAG=development ROOT_DIR=/srv/wso docker stack config -c stack-template.yml | docker stack deploy --compose-file - myapp
+```
 
-# Cleanup on exit
-cleanup() {
-    rm -f "$TEMP_NGINX_CONFIG"
+**Why `docker stack config`?**
+- `docker stack deploy` does not support variable substitution (`${VAR}`)
+- `docker stack config` interpolates variables and outputs the final configuration
+- The output is piped directly to `docker stack deploy`
+- Native Docker Swarm command (no docker-compose dependency needed)
+
+3. Configure nginx for your service (see "Configuring Nginx" section below)
+
+#### Docker Swarm Service Naming
+
+**Important:** When you deploy a stack, Docker Swarm names services using the format `STACKNAME_SERVICENAME`.
+
+Example:
+```bash
+# Deploy command
+IMAGE_TAG=production ROOT_DIR=/srv/wso docker stack config -c stack-template.yml | \
+  docker stack deploy --compose-file - myapp
+
+# If your template has:
+services:
+  webapp:
+    ...
+
+# The full service name will be: myapp_webapp
+```
+
+**In nginx configurations, use the full service name:**
+```nginx
+location / {
+    proxy_pass http://myapp_webapp:8080;  # STACKNAME_SERVICENAME:PORT
 }
-trap cleanup EXIT
-
-# Pull latest image
-docker pull "$IMAGE_NAME"
-
-# Extract nginx configuration from the image
-# (assumes the image contains environment-specific configs like:
-#  /app/nginx-production.conf, /app/nginx-staging.conf)
-docker run --rm "$IMAGE_NAME" cat "/app/nginx-${ENVIRONMENT}.conf" > "$TEMP_NGINX_CONFIG"
-
-# Update nginx configuration (with checksum comparison and validation)
-# This creates/updates: myapp-production.conf or myapp-staging.conf
-sh "$ROOT_DIR/scripts/update-nginx-config.sh" "$NGINX_CONFIG_NAME" "$TEMP_NGINX_CONFIG"
-
-# Update or create the Docker service
-if docker service ls --format '{{.Name}}' | grep -q "^${DOCKER_SERVICE_NAME}$"; then
-    docker service update --with-registry-auth --image "$IMAGE_NAME" "$DOCKER_SERVICE_NAME"
-else
-    docker service create \
-        --with-registry-auth \
-        --name "$DOCKER_SERVICE_NAME" \
-        --network wso-net \
-        "$IMAGE_NAME"
-fi
 ```
 
-See `sources/examples/service-deploy.sh` for a more detailed template with validation.
+#### One Template, Multiple Environments
 
-3. Make it executable:
+The key advantage is using **ONE template for ALL environments** by parametrizing with variables:
+
+- `${IMAGE_TAG}` - Docker image tag (production, staging, development)
+- `${ROOT_DIR}` - Installation directory
+- Any custom variables you need (database URLs, replicas, etc.)
+
+Example with custom variables:
 ```bash
-chmod +x /srv/wso/services/myapp/deploy.sh
+IMAGE_TAG=v1.2.3 REPLICAS=3 ROOT_DIR=/srv/wso docker stack config -c stack-template.yml | docker stack deploy --compose-file - myapp
 ```
 
-4. Deploy using the wrapper script:
+**Version Control Best Practice:**
+- ✅ Commit `stack-template.yml` to git (it's your source of truth)
+- ❌ Never commit interpolated files (they contain environment-specific values)
+- 🔧 Use the same template across all environments
 
-Deploy to production (default):
+#### Updating a Service
+
+Simply redeploy with updated variables or after modifying the template:
 ```bash
-sudo sh /srv/wso/deploy-service.sh myapp
+IMAGE_TAG=production ROOT_DIR=/srv/wso docker stack config -c stack-template.yml | docker stack deploy --compose-file - myapp
 ```
 
-Deploy to staging:
+Docker Swarm will perform a rolling update automatically.
+
+#### Alternative: Script-Based Deployment
+
+You can wrap the deployment workflow in a shell script for automation. See `examples/service-deploy.sh` for a complete template.
+
+This script-based approach:
+- Uses `docker stack config + docker stack deploy` internally
+- Extracts nginx configurations from Docker images automatically
+- Handles environment-specific deployments
+- Provides validation and error handling
+
+**Usage:**
 ```bash
-sudo sh /srv/wso/deploy-service.sh myapp staging
+# Place your stack-template.yml and service-deploy.sh in your project directory
+./service-deploy.sh production
+./service-deploy.sh staging
+./service-deploy.sh development
 ```
 
-Deploy to development:
-```bash
-sudo sh /srv/wso/deploy-service.sh myapp development
-```
-
-The script will automatically:
-- Pull the image with the appropriate tag (e.g., `myapp:staging`, `myapp:production`)
-- Create/update the service with environment-specific name (e.g., `myapp-staging`, `myapp-production`)
-- Generate separate nginx configurations (e.g., `myapp-staging.conf`, `myapp-production.conf`)
+This approach is useful when you need to:
+- Extract nginx configurations from Docker images
+- Perform complex pre/post-deployment operations
+- Automate multi-step deployment workflows
+- Integrate with existing deployment scripts
 
 ### Remote Deployment
 
-For automated deployments from CI/CD pipelines or remote machines, you can use SSH to trigger service deployments:
+For automated deployments from CI/CD pipelines or remote machines, you have two options:
 
-Deploy to production:
+#### Option A: Declarative with Docker Stack (Recommended)
+
+Upload your template file and deploy using docker stack config:
+
 ```bash
-ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp
+# Upload stack template
+scp stack-template.yml deployer@your-server.com:~/myapp-stack-template.yml
+
+# Deploy the stack via SSH with variable interpolation
+ssh deployer@your-server.com "cd ~ && IMAGE_TAG=production ROOT_DIR=/srv/wso docker stack config -c myapp-stack-template.yml | docker stack deploy --compose-file - myapp"
 ```
 
-Deploy to staging:
+**For CI/CD pipelines:**
 ```bash
-ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp staging
+# Example GitHub Actions / GitLab CI
+scp stack-template.yml deployer@your-server.com:~/myapp-stack-template.yml
+ssh deployer@your-server.com "cd ~ && IMAGE_TAG=${CI_COMMIT_TAG:-latest} ROOT_DIR=/srv/wso docker stack config -c myapp-stack-template.yml | docker stack deploy --compose-file - myapp"
 ```
 
-Deploy to development:
+#### Option B: Using Custom Deployment Scripts on Server (Advanced)
+
+For teams with custom deployment workflows, you can still use the wrapper script system:
+
 ```bash
-ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp development
+# Upload your custom deployment script
+scp my-deploy.sh deployer@your-server.com:~/scripts/
+
+# Execute via SSH
+ssh deployer@your-server.com "cd ~/scripts && ./my-deploy.sh production"
 ```
 
-Replace `/srv/wso` with your actual installation directory if different.
-
-**Important Prerequisites:**
-- The service's `deploy.sh` script must already exist on the server at `/srv/wso/services/<service-name>/deploy.sh`
-- The script must be executable (`chmod +x`)
-- **The deployment script must be uploaded by a system administrator with root access**
-- The `deployer` user has restricted permissions and can only execute the deployment command, not create or modify files
-
-**Setup workflow:**
-
-1. **Initial setup (performed by administrator with root access):**
+Or use the legacy `/srv/wso/services/` structure if already configured:
 ```bash
-# As root, create the service directory
-ssh root@your-server.com mkdir -p /srv/wso/services/myapp
-
-# Upload the deploy script as root
-scp deploy.sh root@your-server.com:/srv/wso/services/myapp/
-
-# Make it executable
-ssh root@your-server.com chmod +x /srv/wso/services/myapp/deploy.sh
+ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp [environment]
 ```
 
-2. **Automated deployments (from CI/CD or development machines):**
-```bash
-# The deployer user can trigger the deployment
-ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp
-```
-
-You will be prompted for the `deployer` user password. For CI/CD automation, you can optionally configure SSH key authentication to avoid password prompts.
+This requires the deployment script to be pre-installed on the server by an administrator.
 
 **Optional: SSH Key Authentication for CI/CD:**
 
@@ -270,7 +341,7 @@ Then in your GitHub Action workflow:
 Store the fingerprint output in a GitHub repository variable named `SSH_KNOWN_HOSTS`.
 
 **Security Note:**
-The `deployer` user has minimal privileges by design. It can only execute the `deploy-service.sh` wrapper script via sudo, which validates and runs service-specific deployment scripts. This architecture prevents unauthorized system modifications while enabling safe automated deployments.
+The `deployer` user has access to Docker commands but requires appropriate permissions. For production environments, consider implementing additional access controls and using SSH key-based authentication with restricted keys.
 
 ### Automated Nginx Configuration Updates
 
@@ -337,7 +408,8 @@ server {
     include /etc/nginx/conf.d/ssl-common.conf;
 
     location / {
-        proxy_pass http://myapp-service:8080;
+        # Use STACKNAME_SERVICENAME format (e.g., if stack=myapp, service=webapp)
+        proxy_pass http://myapp_webapp:8080;
 
         # Include common proxy configuration (headers, timeouts, buffering, websockets)
         include /etc/nginx/conf.d/proxy-common.conf;
@@ -377,22 +449,30 @@ These files are automatically installed to `/srv/wso/nginx-conf/` and mounted in
 
 Certificates are automatically renewed via a daily cron job at `/etc/cron.daily/certbot-renew`.
 
-### Updating the Nginx Service
+### Updating the Nginx Stack
 
-To update the nginx Docker image:
+To update the nginx Docker image or configuration:
+
+1. Edit `sources/docker-stack/nginx-compose.yml` to change the image version or configuration
+2. Redeploy the stack using docker stack config:
 
 ```bash
-docker service update --image nginx:1.29-alpine nginx
+cd /path/to/web-server-orchestrator
+ROOT_DIR=/srv/wso docker stack config -c sources/docker-stack/nginx-compose.yml | docker stack deploy --compose-file - nginx
 ```
 
-Or use a specific version:
-```bash
-docker service update --image nginx:1.27-alpine nginx
-```
+The stack will be updated with zero downtime using Docker Swarm's rolling update mechanism.
 
 ### Creating Additional Services
 
-Services can be created using standard Docker Swarm commands:
+The recommended approach is to use Docker Stack templates with `docker stack config` and `docker stack deploy`:
+
+```bash
+# Create a stack-template.yml for your service (see examples/stack-template.yml)
+IMAGE_TAG=production ROOT_DIR=/srv/wso docker stack config -c stack-template.yml | docker stack deploy --compose-file - myapp
+```
+
+Alternatively, you can still use imperative Docker service commands:
 
 ```bash
 docker service create \
@@ -403,10 +483,18 @@ docker service create \
   registry.example.com/myapp:latest
 ```
 
+However, the declarative approach with compose files is preferred for better maintainability and version control.
+
 ## Templates and Examples
 
-The `sources/` directory contains templates and examples:
+The `sources/` directory and examples contain templates and examples:
 
+- `sources/docker-stack/` - Docker Stack compose files
+  - `nginx-compose.yml` - Nginx service stack definition
+- `examples/` - Example configurations and templates
+  - `stack-template.yml` - Complete service deployment template with variables and documentation
+  - `service-deploy.sh` - Service deployment script wrapper (alternative approach)
+  - `nginx-proxy.conf` - Example nginx reverse proxy configuration
 - `sources/nginx/` - Nginx configuration files
   - `proxy.conf` - Reverse proxy configuration example
   - `ssl-common.conf` - Common SSL settings (TLS protocols, ciphers, HSTS)
@@ -420,8 +508,6 @@ The `sources/` directory contains templates and examples:
   - `deployer-deploy` - Sudoers rules for deployer user
 - `sources/static/` - Default static files
   - `index.html` - Default nginx index page
-- `sources/examples/` - Example deployment scripts
-  - `service-deploy.sh` - Service deployment script template
 
 ## Security Considerations
 

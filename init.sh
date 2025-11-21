@@ -386,19 +386,14 @@ else
 fi
 
 ################################################################################
-# Create or update nginx service
+# Deploy nginx stack
 ################################################################################
-log_info "Checking nginx service..."
+log_info "Checking nginx stack..."
 
-# Define nginx service configuration
-NGINX_IMAGE="nginx:1.29-alpine"
-NGINX_MOUNTS="
-  --mount type=bind,src=$ROOT_DIR/nginx-conf,dst=/etc/nginx/conf.d
-  --mount type=bind,src=$ROOT_DIR/static/default,dst=/usr/share/nginx/html
-  --mount type=bind,src=$ROOT_DIR/static/sites,dst=/usr/share/nginx/sites
-  --mount type=bind,src=$ROOT_DIR/data/letsencrypt,dst=/etc/letsencrypt
-"
+NGINX_STACK_NAME="nginx"
+NGINX_COMPOSE_FILE="$SCRIPT_DIR/sources/docker-stack/nginx-compose.yml"
 
+# Check if nginx service already exists
 if docker service ls 2>/dev/null | grep -q "nginx"; then
     log_success "Nginx service already exists"
 
@@ -407,46 +402,24 @@ if docker service ls 2>/dev/null | grep -q "nginx"; then
 
     echo ""
     echo "Current nginx image: $CURRENT_IMAGE"
-    echo "Target nginx image:  $NGINX_IMAGE"
+    echo "Target nginx image:  nginx:1.29-alpine"
     echo ""
 
-    # Ensure nginx is connected to wso-net (idempotent)
-    log_info "Ensuring nginx is connected to wso-net..."
-    docker service update --network-add wso-net nginx >/dev/null 2>&1 || true
+    read -p "Do you want to redeploy the nginx stack? This will update the configuration. (y/N): " redeploy_nginx
 
-    if [ "$CURRENT_IMAGE" != "$NGINX_IMAGE" ]; then
-        read -p "Do you want to update the nginx service to $NGINX_IMAGE? (y/N): " update_nginx
-
-        if [ "$update_nginx" = "y" ] || [ "$update_nginx" = "Y" ]; then
-            log_info "Updating nginx service image..."
-            docker service update --image "$NGINX_IMAGE" nginx
-            log_success "Nginx service updated to $NGINX_IMAGE"
-        else
-            log_info "Nginx service update skipped"
-        fi
+    if [ "$redeploy_nginx" = "y" ] || [ "$redeploy_nginx" = "Y" ]; then
+        log_info "Deploying nginx stack..."
+        cd "$SCRIPT_DIR"
+        ROOT_DIR="$ROOT_DIR" docker stack config -c "$NGINX_COMPOSE_FILE" | docker stack deploy --compose-file - "$NGINX_STACK_NAME"
+        log_success "Nginx stack redeployed"
     else
-        log_info "Nginx service is already running the target image"
+        log_info "Nginx stack deployment skipped"
     fi
-
-    echo ""
-    log_info "Note: Mount points are not updated for existing services."
-    log_info "If you changed ROOT_DIR, you may need to recreate the service:"
-    log_info "  docker service rm nginx"
-    log_info "  Then re-run this installation script"
 else
-    log_info "Creating nginx service..."
-
-    docker service create --mode global --name nginx \
-      --network wso-net \
-      --publish mode=host,target=80,published=80 \
-      --publish mode=host,target=443,published=443 \
-      --mount type=bind,src=$ROOT_DIR/nginx-conf,dst=/etc/nginx/conf.d \
-      --mount type=bind,src=$ROOT_DIR/static/default,dst=/usr/share/nginx/html \
-      --mount type=bind,src=$ROOT_DIR/static/sites,dst=/usr/share/nginx/sites \
-      --mount type=bind,src=$ROOT_DIR/data/letsencrypt,dst=/etc/letsencrypt \
-      "$NGINX_IMAGE"
-
-    log_success "Nginx service created"
+    log_info "Deploying nginx stack..."
+    cd "$SCRIPT_DIR"
+    ROOT_DIR="$ROOT_DIR" docker stack config -c "$NGINX_COMPOSE_FILE" | docker stack deploy --compose-file - "$NGINX_STACK_NAME"
+    log_success "Nginx stack deployed"
 fi
 
 ################################################################################
@@ -472,7 +445,7 @@ echo "  4. Deploy services: sudo sh $ROOT_DIR/deploy-service.sh <project-name>"
 echo ""
 log_info "Example nginx templates are available in the repository under sources/nginx/"
 echo ""
-log_info "To update the nginx service image:"
-echo "  docker service update --image nginx:1.29-alpine nginx"
+log_info "To update the nginx stack:"
+echo "  cd $SCRIPT_DIR && ROOT_DIR=$ROOT_DIR docker stack config -c sources/docker-stack/nginx-compose.yml | docker stack deploy --compose-file - nginx"
 echo ""
 echo "================================================================================"
