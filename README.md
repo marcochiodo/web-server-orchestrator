@@ -101,7 +101,9 @@ After installation, your WSO instance will be ready at the configured directory 
 
 ```
 /srv/wso/
-├── deploy-service.sh          # Service deployment wrapper
+├── deploy-service.sh          # Managed deployment system
+│                              # - Wrapper that sources service configuration scripts
+│                              # - Executes deployment based on WSO_* variables
 ├── scripts/
 │   ├── nginx-reload.sh        # Reload nginx configuration
 │   ├── update-nginx-config.sh # Update and validate nginx config for a service
@@ -245,29 +247,91 @@ IMAGE_TAG=production ROOT_DIR=/srv/wso docker stack config -c stack-template.yml
 
 Docker Swarm will perform a rolling update automatically.
 
-#### Alternative: Script-Based Deployment
+#### Alternative: Managed Deployment with Configuration Scripts
 
-You can wrap the deployment workflow in a shell script for automation. See `examples/service-deploy.sh` for a complete template.
+WSO provides a managed deployment system that uses a clean configuration protocol. Your deployment scripts simply declare configuration variables, and WSO handles the entire deployment workflow.
 
-This script-based approach:
-- Uses `docker stack config + docker stack deploy` internally
-- Extracts nginx configurations from Docker images automatically
-- Handles environment-specific deployments
-- Provides validation and error handling
+**The Configuration Protocol:**
 
-**Usage:**
+1. Create a deployment configuration script in `/srv/wso/services/<project>/deploy.sh`
+2. Call the wrapper: `sh /srv/wso/deploy-service.sh <project> <environment>`
+3. The wrapper validates inputs and sources your configuration script
+4. Your script sets `WSO_*` configuration variables
+5. The wrapper validates variables and executes the deployment
+6. No code duplication - all deployment logic is centralized
+
+**Required Configuration Variables:**
+
+Your deployment script must set these variables:
+
+- `WSO_SERVICE_NAME` - Stack name and nginx config name (e.g., "myapp-staging")
+- `WSO_IMAGE_NAME` - Full Docker image name (e.g., "registry.com/myapp:tag")
+- `WSO_NGINX_CONFIG_PATH` - Path to nginx config inside the container
+- `WSO_STACK_COMPOSE_PATH` - Path to stack compose file inside the container
+
+**Optional: Environment Variables for docker stack config**
+
+Export any variables your stack compose template uses:
+- `IMAGE_TAG` - Docker image tag
+- `ROOT_DIR` - WSO installation directory
+- Any custom variables (DATABASE_URL, REPLICAS, etc.)
+
+**Example Configuration Script:**
+
+See `examples/service-deploy.sh` for a complete template. Here's a minimal example for `/srv/wso/services/myapp/deploy.sh`:
+
 ```bash
-# Place your stack-template.yml and service-deploy.sh in your project directory
-./service-deploy.sh production
-./service-deploy.sh staging
-./service-deploy.sh development
+#!/bin/sh
+set -eu
+
+# Environment is passed as $1 (already validated by parent)
+ENVIRONMENT="$1"
+
+# WSO Configuration Variables
+WSO_SERVICE_NAME="myapp-${ENVIRONMENT}"
+WSO_IMAGE_NAME="my.registry.com/myapp:${ENVIRONMENT}"
+WSO_NGINX_CONFIG_PATH="/app/etc/wso-nginx-${ENVIRONMENT}.conf"
+WSO_STACK_COMPOSE_PATH="/app/etc/stack-compose.yml"
+
+# Environment variables for docker stack config
+# ROOT_DIR is automatically set by parent from script location
+export ENVIRONMENT="${ENVIRONMENT}"
+export ROOT_DIR="${ROOT_DIR:-/srv/wso}"
 ```
 
-This approach is useful when you need to:
-- Extract nginx configurations from Docker images
-- Perform complex pre/post-deployment operations
-- Automate multi-step deployment workflows
-- Integrate with existing deployment scripts
+**Running the deployment:**
+```bash
+# Using the WSO wrapper
+sh /srv/wso/deploy-service.sh myapp staging
+sh /srv/wso/deploy-service.sh myapp production
+sh /srv/wso/deploy-service.sh myapp v1.2.3
+
+# Or if you're the deployer user with sudo access
+sudo sh /srv/wso/deploy-service.sh myapp staging
+```
+
+Both `<project>` and `<environment>` arguments are required. The environment must be a valid Docker tag (1-128 chars, alphanumeric + `_.-`, cannot start with `.` or `-`).
+
+**What WSO Does Automatically:**
+
+1. Determines `ROOT_DIR` from script location (portable)
+2. Validates project name and environment format
+3. Sources your configuration script passing validated environment
+4. Validates all required `WSO_*` variables are set
+5. Pulls the Docker image
+6. Extracts nginx config and stack compose from the image
+7. Runs `docker stack config` to interpolate variables
+8. Deploys with `docker stack deploy`
+9. Updates nginx configuration at the right time (before/after deploy)
+10. Handles errors and validation
+
+**Benefits of this approach:**
+- **Zero code duplication** - deployment logic is centralized
+- **Simple configuration** - just declare variables, no complex logic
+- **Consistent workflow** - all services deployed the same way
+- **Easy maintenance** - update deployment logic in one place
+- **Validation built-in** - automatic checks for required variables
+- **Clean separation** - configuration separate from execution
 
 ### Remote Deployment
 
@@ -292,24 +356,30 @@ scp stack-template.yml deployer@your-server.com:~/myapp-stack-template.yml
 ssh deployer@your-server.com "cd ~ && IMAGE_TAG=${CI_COMMIT_TAG:-latest} ROOT_DIR=/srv/wso docker stack config -c myapp-stack-template.yml | docker stack deploy --compose-file - myapp"
 ```
 
-#### Option B: Using Custom Deployment Scripts on Server (Advanced)
+#### Option B: Using WSO Managed Deployment (Recommended for teams)
 
-For teams with custom deployment workflows, you can still use the wrapper script system:
+For teams with standard deployment patterns, use WSO's managed deployment system:
 
+**Setup (one-time per project):**
+1. Create your deployment configuration script on the server at `/srv/wso/services/myapp/deploy.sh`
+2. Configure the `WSO_*` variables as shown in the example above
+
+**Deploy from CI/CD:**
 ```bash
-# Upload your custom deployment script
-scp my-deploy.sh deployer@your-server.com:~/scripts/
+# Trigger the WSO wrapper with project name and environment
+ssh deployer@your-server.com "sh /srv/wso/deploy-service.sh myapp staging"
+ssh deployer@your-server.com "sh /srv/wso/deploy-service.sh myapp production"
 
-# Execute via SSH
-ssh deployer@your-server.com "cd ~/scripts && ./my-deploy.sh production"
+# Or use version tags
+ssh deployer@your-server.com "sh /srv/wso/deploy-service.sh myapp v1.2.3"
 ```
 
-Or use the legacy `/srv/wso/services/` structure if already configured:
-```bash
-ssh deployer@your-server.com sh /srv/wso/deploy-service.sh myapp [environment]
-```
-
-This requires the deployment script to be pre-installed on the server by an administrator.
+**Benefits:**
+- Configuration lives on the server (versioned in WSO repo)
+- No need to upload scripts on every deployment
+- Centralized deployment logic
+- Consistent across all projects
+- Built-in validation and error handling
 
 **Optional: SSH Key Authentication for CI/CD:**
 
@@ -493,14 +563,18 @@ The `sources/` directory and examples contain templates and examples:
   - `nginx-compose.yml` - Nginx service stack definition
 - `examples/` - Example configurations and templates
   - `stack-template.yml` - Complete service deployment template with variables and documentation
-  - `service-deploy.sh` - Service deployment script wrapper (alternative approach)
+  - `service-deploy.sh` - Example deployment configuration script (sets WSO_* variables)
   - `nginx-proxy.conf` - Example nginx reverse proxy configuration
 - `sources/nginx/` - Nginx configuration files
   - `proxy.conf` - Reverse proxy configuration example
   - `ssl-common.conf` - Common SSL settings (TLS protocols, ciphers, HSTS)
   - `proxy-common.conf` - Common proxy settings (headers, timeouts, buffering, websockets)
 - `sources/scripts/` - System management scripts
-  - `deploy-service.sh` - Secure service deployment wrapper
+  - `deploy-service.sh` - Managed deployment system
+    - Sources service configuration scripts from `/srv/wso/services/<project>/deploy.sh`
+    - Configuration scripts set `WSO_*` variables
+    - Executes deployment with `deploy()` function using provided configuration
+    - Handles validation, error checking, and deployment workflow
   - `nginx-reload.sh` - Nginx configuration reload
   - `update-nginx-config.sh` - Safe nginx config update with validation
   - `certbot-*.sh` - SSL certificate management scripts
