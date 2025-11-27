@@ -26,6 +26,12 @@ stack:
         replicas: 1
         restart_policy:
           condition: on-failure
+        update_config:
+          parallelism: 1
+          failure_action: rollback
+          order: start-first
+        rollback_config:
+          parallelism: 1
 
       environment:
         - API_KEY=${API_KEY}

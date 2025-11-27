@@ -118,10 +118,12 @@ log "Parsing manifest (version $MANIFEST_VERSION)..."
 
 # Extract service configuration
 SERVICE_NAME="$(parse_manifest '.service')"
+DATA_UID="$(parse_manifest '.data_uid // 1000')"
 
 [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" = "null" ] && die "service is required"
 
 log "  Service: $SERVICE_NAME"
+log "  Data UID: $DATA_UID"
 
 # =============================================================================
 # Extract Stack Configuration from Manifest
@@ -325,6 +327,17 @@ log "========================================"
 log "Service: ${SERVICE_NAME}"
 log "========================================"
 
+# Create service data directory
+log "Preparing service data directory..."
+SERVICE_DATA_DIR="${DATA_DIR}/${SERVICE_NAME}"
+if [ ! -d "$SERVICE_DATA_DIR" ]; then
+    mkdir -p "$SERVICE_DATA_DIR" || die "Failed to create $SERVICE_DATA_DIR"
+    chown "${DATA_UID}:${DATA_UID}" "$SERVICE_DATA_DIR" || die "Failed to set ownership of $SERVICE_DATA_DIR"
+    log "  ✓ Created: $SERVICE_DATA_DIR (owner: ${DATA_UID}:${DATA_UID})"
+else
+    log "  ✓ Exists: $SERVICE_DATA_DIR"
+fi
+
 # Manage host secrets
 manage_host_secrets
 
@@ -356,15 +369,32 @@ fi
 # Deploy stack
 log "Deploying stack..."
 if docker stack deploy --with-registry-auth --compose-file "$TEMP_STACK_COMPOSE" "$SERVICE_NAME"; then
-    log "  ✓ Stack deployed successfully"
+    log "  ✓ Stack deployment initiated"
 else
     die "Failed to deploy stack"
 fi
 
+# Wait for deployment to stabilize
+log "Waiting for services to stabilize..."
+sleep 10
+
+# Check deployment status
+log "Verifying deployment..."
+FAILED_SERVICES=$(docker stack services "$SERVICE_NAME" --format '{{.Name}} {{.Replicas}}' | grep ' 0/' || true)
+
+if [ -n "$FAILED_SERVICES" ]; then
+    error "Some services failed to start:"
+    echo "$FAILED_SERVICES" | while IFS=' ' read -r svc replicas; do
+        error "  - $svc ($replicas)"
+        docker service ps "$svc" --no-trunc --format '    {{.CurrentState}}: {{.Error}}' | head -3 >&2
+    done
+    die "Deployment verification failed - check service logs"
+fi
+
+log "  ✓ All services running"
+
 # Update nginx after deploy if stack is new
 if [ "$STACK_EXISTS" = false ]; then
-    log "Waiting for services to start..."
-    sleep 5
     log "Creating nginx configuration..."
     sh "${WSO_LIB}/scripts/update-nginx-config.sh" "$SERVICE_NAME" "$TEMP_NGINX_CONFIG"
 fi

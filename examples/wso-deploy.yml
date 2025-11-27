@@ -22,6 +22,14 @@ stack:
           condition: on-failure
           delay: 5s
           max_attempts: 3
+        update_config:
+          parallelism: 1
+          delay: 10s
+          failure_action: rollback
+          order: start-first
+        rollback_config:
+          parallelism: 1
+          delay: 5s
 
       environment:
         - API_KEY=${API_KEY}
