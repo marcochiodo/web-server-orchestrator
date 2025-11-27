@@ -83,12 +83,12 @@ log "Parsing manifest: $MANIFEST_PATH"
 FORCE_HTTPS="$(parse_manifest '.force_https // false')"
 DOMAINS_COUNT="$(parse_manifest '.domains | length')"
 
-if [ "$DOMAINS_COUNT" = "0" ] || [ "$DOMAINS_COUNT" = "null" ]; then
-    die "No domains defined in manifest. Add 'domains' array."
+if [ "$DOMAINS_COUNT" = "null" ]; then
+    DOMAINS_COUNT=0
 fi
 
 log "  Service: $SERVICE_NAME"
-log "  Domains: $DOMAINS_COUNT"
+log "  Custom domains: $DOMAINS_COUNT"
 log "  Force HTTPS: $FORCE_HTTPS"
 
 # =============================================================================
@@ -109,14 +109,16 @@ EOF
 # Generate server blocks for each domain
 # =============================================================================
 
-log "Generating server blocks for domains..."
+if [ "$DOMAINS_COUNT" -gt 0 ]; then
+    log "Generating server blocks for custom domains..."
+fi
 
 i=0
 while [ $i -lt "$DOMAINS_COUNT" ]; do
     DOMAIN="$(parse_manifest ".domains[$i].domain")"
     CERT_NAME="$(parse_manifest ".domains[$i].cert_name // \"${SERVICE_NAME}_${DOMAIN}\"")"
     CONTAINER_NAME="$(parse_manifest ".domains[$i].container_name")"
-    PORT="$(parse_manifest ".domains[$i].port // 80")"
+    PORT="$(parse_manifest ".domains[$i].port // 8080")"
 
     if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "null" ]; then
         error "Domain at index $i is empty or null, skipping"
@@ -217,9 +219,15 @@ log "Adding service-specific chdev.eu subdomain..."
 CHDEV_DOMAIN="${SERVICE_NAME}.chdev.eu"
 CHDEV_CERT_PATH="/etc/letsencrypt/live/chdev.eu"
 
-# Get first domain's container_name and port as default
-DEFAULT_CONTAINER="$(parse_manifest '.domains[0].container_name')"
-DEFAULT_PORT="$(parse_manifest '.domains[0].port // 80')"
+# Determine container and port for chdev.eu subdomain
+# Priority: default_domain > domains[0]
+DEFAULT_CONTAINER="$(parse_manifest '.default_domain.container_name // .domains[0].container_name')"
+DEFAULT_PORT="$(parse_manifest '.default_domain.port // .domains[0].port // 8080')"
+
+if [ -z "$DEFAULT_CONTAINER" ] || [ "$DEFAULT_CONTAINER" = "null" ]; then
+    die "Either 'default_domain.container_name' or 'domains[0].container_name' must be specified"
+fi
+
 CHDEV_UPSTREAM="${SERVICE_NAME}_${DEFAULT_CONTAINER}"
 
 log "  - $CHDEV_DOMAIN -> $CHDEV_UPSTREAM:$DEFAULT_PORT (cert: chdev.eu wildcard)"

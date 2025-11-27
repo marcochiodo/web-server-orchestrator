@@ -1,0 +1,38 @@
+# WSO Deployment Manifest v2.0 - Minimal Example
+#
+# This is the minimal manifest for a service that only needs:
+# - service-name.chdev.eu subdomain (auto-configured)
+# - No custom domains
+# - No SSL certificates to generate
+
+version: "2.0"
+
+service: myapp-${ENVIRONMENT}
+
+# Default domain for service-name.chdev.eu
+# This is the ONLY required configuration for nginx
+default_domain:
+  container_name: webapp
+  # port: 8080  # optional, defaults to 8080
+
+# Docker stack configuration
+stack:
+  version: '3.8'
+  services:
+    webapp:
+      image: registry.com/myapp:${ENVIRONMENT}
+
+      deploy:
+        replicas: 1
+        restart_policy:
+          condition: on-failure
+
+      environment:
+        - API_KEY=${API_KEY}
+
+      networks:
+        - wso-net
+
+  networks:
+    wso-net:
+      external: true

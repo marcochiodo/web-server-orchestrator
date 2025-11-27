@@ -42,18 +42,28 @@ stack:
 secrets:
   bearer_token: "${BEARER_TOKEN}"
 
-# Nginx configuration (auto-generated from domains)
+# Nginx configuration (auto-generated)
+# All nginx settings are optional
 force_https: true
+
+# Default domain configuration for service-name.chdev.eu
+# Optional: if omitted, uses domains[0] or fails if no domains defined
+default_domain:
+  container_name: webapp
+  port: 8080  # optional, default: 8080
+
+# Custom domains (optional)
+# If omitted, only service-name.chdev.eu will be configured
 domains:
   - domain: example.com
-    cert_name: myapp-staging_example.com
+    cert_name: myapp-staging_example.com  # optional, default: service_domain
     container_name: webapp
-    port: 8080
+    port: 8080  # optional, default: 8080
 
   - domain: www.example.com
     cert_name: myapp-staging_www.example.com
     container_name: webapp
-    port: 8080
+    # port: 8080  # omitted, uses default
 
 # Cron jobs
 cron_jobs:
