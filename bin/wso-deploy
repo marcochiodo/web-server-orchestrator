@@ -45,6 +45,13 @@ check_yq() {
     if ! command -v yq >/dev/null 2>&1; then
         die "yq is not installed. Install with: sudo dnf install yq"
     fi
+
+    # Detect yq version (Go vs Python)
+    if yq --help 2>&1 | grep -q "eval"; then
+        YQ_TYPE="go"
+    else
+        YQ_TYPE="python"
+    fi
 }
 
 # =============================================================================
@@ -95,7 +102,11 @@ fi
 # =============================================================================
 
 parse_manifest() {
-    yq eval "$1" "$MANIFEST_PATH"
+    if [ "$YQ_TYPE" = "go" ]; then
+        yq eval "$1" "$MANIFEST_PATH"
+    else
+        yq "$1" "$MANIFEST_PATH"
+    fi
 }
 
 MANIFEST_VERSION="$(parse_manifest '.version')"
@@ -128,8 +139,10 @@ trap cleanup EXIT INT TERM
 log "Extracting stack configuration from manifest..."
 
 # Extract stack section (required)
-if ! yq eval '.stack' "$MANIFEST_PATH" > "$TEMP_STACK_COMPOSE" 2>/dev/null; then
-    die "Failed to extract .stack from manifest"
+if [ "$YQ_TYPE" = "go" ]; then
+    yq eval '.stack' "$MANIFEST_PATH" > "$TEMP_STACK_COMPOSE" 2>/dev/null || die "Failed to extract .stack from manifest"
+else
+    yq '.stack' "$MANIFEST_PATH" > "$TEMP_STACK_COMPOSE" 2>/dev/null || die "Failed to extract .stack from manifest"
 fi
 
 # Verify stack section exists and is not empty

@@ -28,6 +28,13 @@ check_yq() {
     if ! command -v yq >/dev/null 2>&1; then
         die "yq is not installed. Install with: sudo dnf install yq"
     fi
+
+    # Detect yq version (Go vs Python)
+    if yq --help 2>&1 | grep -q "eval"; then
+        YQ_TYPE="go"
+    else
+        YQ_TYPE="python"
+    fi
 }
 
 # =============================================================================
@@ -64,7 +71,11 @@ fi
 # =============================================================================
 
 parse_manifest() {
-    yq eval "$1" "$MANIFEST_PATH"
+    if [ "$YQ_TYPE" = "go" ]; then
+        yq eval "$1" "$MANIFEST_PATH"
+    else
+        yq "$1" "$MANIFEST_PATH"
+    fi
 }
 
 log "Parsing manifest: $MANIFEST_PATH"
