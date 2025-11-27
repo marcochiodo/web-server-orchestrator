@@ -45,5 +45,5 @@ jobs:
           SSH_PASSWORD: ${{ secrets.SSH_DEPLOYER_PASSWORD }}
           WSO_HOST: ${{ vars.WSO_HOST }}
         run: |
-          cat /tmp/manifest.yml | sshpass -p "$SSH_PASSWORD" ssh deployer@${WSO_HOST} "wso-deploy -"
+          cat /tmp/manifest.yml | sshpass -p "$SSH_PASSWORD" ssh deployer@${WSO_HOST} "sudo wso-deploy -"
           rm -f /tmp/manifest.yml
