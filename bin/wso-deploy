@@ -128,7 +128,7 @@ trap cleanup EXIT INT TERM
 log "Extracting stack configuration from manifest..."
 
 # Extract stack section (required)
-if ! yq eval '.stack' "$MANIFEST_FILE" > "$TEMP_STACK_COMPOSE" 2>/dev/null; then
+if ! yq eval '.stack' "$MANIFEST_PATH" > "$TEMP_STACK_COMPOSE" 2>/dev/null; then
     die "Failed to extract .stack from manifest"
 fi
 
