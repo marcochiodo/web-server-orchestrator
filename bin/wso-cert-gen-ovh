@@ -131,7 +131,7 @@ echo "Caricamento credenziali OVH da systemd-creds..."
 TEMP_OVH_INI="/tmp/ovh-$$.ini"
 trap "rm -f $TEMP_OVH_INI" EXIT INT TERM
 
-if ! sudo systemd-creds decrypt --name="${CRED_NAME}" > "$TEMP_OVH_INI" 2>/dev/null; then
+if ! sudo systemd-creds decrypt --name="${CRED_NAME}" "$CRED_FILE" > "$TEMP_OVH_INI" 2>/dev/null; then
     echo "Errore: Impossibile decifrare le credenziali OVH" >&2
     echo "Le credenziali potrebbero essere corrotte. Rimuovi $CRED_FILE e riprova." >&2
     exit 1
