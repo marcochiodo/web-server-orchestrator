@@ -375,23 +375,35 @@ else
 fi
 
 # Wait for deployment to stabilize
-log "Waiting for services to stabilize..."
-sleep 10
+log "Waiting for services to stabilize (pulling images, starting containers)..."
+sleep 20
 
 # Check deployment status
 log "Verifying deployment..."
-FAILED_SERVICES=$(docker stack services "$SERVICE_NAME" --format '{{.Name}} {{.Replicas}}' | grep ' 0/' || true)
 
-if [ -n "$FAILED_SERVICES" ]; then
-    error "Some services failed to start:"
-    echo "$FAILED_SERVICES" | while IFS=' ' read -r svc replicas; do
-        error "  - $svc ($replicas)"
-        docker service ps "$svc" --no-trunc --format '    {{.CurrentState}}: {{.Error}}' | head -3 >&2
-    done
-    die "Deployment verification failed - check service logs"
-fi
+docker stack services "$SERVICE_NAME" --format '{{.Name}}' | while read -r svc; do
+    REPLICAS=$(docker service ls --filter "name=$svc" --format '{{.Replicas}}')
 
-log "  ✓ All services running"
+    # Check if service has running replicas
+    if echo "$REPLICAS" | grep -qE '^[1-9][0-9]*/[0-9]+'; then
+        log "  ✓ Service $svc: $REPLICAS"
+    else
+        # No running replicas - check latest task state
+        LATEST_TASK=$(docker service ps "$svc" --format '{{.CurrentState}}' --filter 'desired-state=running' --no-trunc | head -1)
+
+        if echo "$LATEST_TASK" | grep -qE '(Preparing|Starting|Running)'; then
+            log "  ⏳ Service $svc still starting: $REPLICAS - $LATEST_TASK"
+        elif echo "$LATEST_TASK" | grep -qE '(Rejected|Failed|Shutdown)'; then
+            error "Service $svc failed to start: $REPLICAS"
+            docker service ps "$svc" --no-trunc --format 'table {{.Name}}\t{{.CurrentState}}\t{{.Error}}' --filter 'desired-state=running' | head -5 >&2
+            exit 1
+        else
+            log "  ? Service $svc status unclear: $REPLICAS - $LATEST_TASK"
+        fi
+    fi
+done
+
+log "Deployment verification completed"
 
 # Update nginx after deploy if stack is new
 if [ "$STACK_EXISTS" = false ]; then

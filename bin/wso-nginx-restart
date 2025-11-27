@@ -1,0 +1,40 @@
+#!/bin/sh
+set -e
+
+# Find nginx container (part of system stack)
+NGINX_CONTAINER=$(docker ps -q -f name=system_nginx)
+
+if [ -z "$NGINX_CONTAINER" ]; then
+    echo "Error: Nginx container not found (system stack)" >&2
+    exit 1
+fi
+
+echo "Testing nginx configuration..."
+
+# Test configuration
+if ! docker exec "$NGINX_CONTAINER" nginx -t 2>&1; then
+    echo "Error: Nginx configuration test failed" >&2
+    echo "Nginx was NOT restarted" >&2
+    exit 1
+fi
+
+echo "Configuration test passed"
+echo "Restarting nginx (graceful shutdown + Docker Swarm restart)..."
+
+# Send quit signal for graceful shutdown - Docker Swarm will restart it
+if docker exec "$NGINX_CONTAINER" nginx -s quit; then
+    echo "Nginx shutdown signal sent"
+    echo "Waiting for Docker Swarm to restart the container..."
+    sleep 5
+
+    # Verify it restarted
+    NEW_CONTAINER=$(docker ps -q -f name=system_nginx)
+    if [ -n "$NEW_CONTAINER" ]; then
+        echo "Nginx restarted successfully"
+    else
+        echo "Warning: Container not yet restarted (may take a few more seconds)"
+    fi
+else
+    echo "Error: Nginx restart signal failed" >&2
+    exit 1
+fi
