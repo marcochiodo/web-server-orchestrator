@@ -27,6 +27,10 @@ services:
         source: /var/lib/wso/nginx
         target: /etc/nginx/conf.d
       - type: bind
+        source: /etc/wso/nginx-includes
+        target: /etc/nginx/conf.d/includes
+        read_only: true
+      - type: bind
         source: /usr/lib/wso/www-default
         target: /usr/share/nginx/html
       - type: bind

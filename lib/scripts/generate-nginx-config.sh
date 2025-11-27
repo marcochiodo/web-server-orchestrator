@@ -170,7 +170,7 @@ EOF
     # Proxy to container
     location / {
         proxy_pass http://${UPSTREAM}:${PORT};
-        include /etc/nginx/conf.d/proxy-common.conf;
+        include /etc/nginx/conf.d/includes/proxy-common.conf;
     }
 }
 
@@ -190,12 +190,12 @@ server {
     ssl_certificate_key ${CERT_PATH}/privkey.pem;
 
     # Include common SSL configuration
-    include /etc/nginx/conf.d/ssl-common.conf;
+    include /etc/nginx/conf.d/includes/ssl-common.conf;
 
     # Proxy to container
     location / {
         proxy_pass http://${UPSTREAM}:${PORT};
-        include /etc/nginx/conf.d/proxy-common.conf;
+        include /etc/nginx/conf.d/includes/proxy-common.conf;
     }
 
     # Custom error pages
@@ -261,7 +261,7 @@ else
     # Proxy to container
     location / {
         proxy_pass http://${CHDEV_UPSTREAM}:${DEFAULT_PORT};
-        include /etc/nginx/conf.d/proxy-common.conf;
+        include /etc/nginx/conf.d/includes/proxy-common.conf;
     }
 }
 
@@ -280,12 +280,12 @@ server {
     ssl_certificate_key ${CHDEV_CERT_PATH}/privkey.pem;
 
     # Include common SSL configuration
-    include /etc/nginx/conf.d/ssl-common.conf;
+    include /etc/nginx/conf.d/includes/ssl-common.conf;
 
     # Proxy to container
     location / {
         proxy_pass http://${CHDEV_UPSTREAM}:${DEFAULT_PORT};
-        include /etc/nginx/conf.d/proxy-common.conf;
+        include /etc/nginx/conf.d/includes/proxy-common.conf;
     }
 
     # Custom error pages
