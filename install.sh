@@ -231,6 +231,7 @@ EOF
     log_success "WSO configuration created"
 else
     log_info "WSO configuration already exists"
+    source /etc/wso/wso.conf
 fi
 
 ################################################################################
