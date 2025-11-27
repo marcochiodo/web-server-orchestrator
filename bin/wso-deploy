@@ -105,7 +105,7 @@ parse_manifest() {
     if [ "$YQ_TYPE" = "go" ]; then
         yq eval "$1" "$MANIFEST_PATH"
     else
-        yq "$1" "$MANIFEST_PATH"
+        yq -r "$1" "$MANIFEST_PATH"
     fi
 }
 
@@ -142,7 +142,7 @@ log "Extracting stack configuration from manifest..."
 if [ "$YQ_TYPE" = "go" ]; then
     yq eval '.stack' "$MANIFEST_PATH" > "$TEMP_STACK_COMPOSE" 2>/dev/null || die "Failed to extract .stack from manifest"
 else
-    yq '.stack' "$MANIFEST_PATH" > "$TEMP_STACK_COMPOSE" 2>/dev/null || die "Failed to extract .stack from manifest"
+    yq -y '.stack' "$MANIFEST_PATH" > "$TEMP_STACK_COMPOSE" 2>/dev/null || die "Failed to extract .stack from manifest"
 fi
 
 # Verify stack section exists and is not empty

@@ -74,7 +74,7 @@ parse_manifest() {
     if [ "$YQ_TYPE" = "go" ]; then
         yq eval "$1" "$MANIFEST_PATH"
     else
-        yq "$1" "$MANIFEST_PATH"
+        yq -r "$1" "$MANIFEST_PATH"
     fi
 }
 
