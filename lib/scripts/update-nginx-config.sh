@@ -88,22 +88,26 @@ TEST_EXIT_CODE=$?
 
 if [ $TEST_EXIT_CODE -eq 0 ]; then
     echo "Nginx configuration syntax is valid"
-elif echo "$TEST_OUTPUT" | grep -q "host not found in upstream"; then
-    echo "Warning: Upstream services not yet reachable (this is normal during deployment)"
-    echo "Nginx will resolve them when services are running"
 else
-    echo "Error: Nginx configuration syntax test failed" >&2
-    echo "$TEST_OUTPUT" >&2
-
-    # Restore backup
-    if [ -f "$BACKUP_FILE" ]; then
-        echo "Restoring backup configuration..."
-        mv "$BACKUP_FILE" "$TARGET_FILE"
+    # Check if error is due to upstream not found
+    if echo "$TEST_OUTPUT" | grep -q "host not found in upstream" 2>/dev/null || \
+       echo "$TEST_OUTPUT" | grep -q "could not be resolved" 2>/dev/null; then
+        echo "Warning: Upstream services not yet reachable (this is normal during deployment)"
+        echo "Nginx will resolve them when services are running"
     else
-        echo "Removing invalid configuration file..."
-        rm "$TARGET_FILE"
+        echo "Error: Nginx configuration syntax test failed" >&2
+        echo "$TEST_OUTPUT" >&2
+
+        # Restore backup
+        if [ -f "$BACKUP_FILE" ]; then
+            echo "Restoring backup configuration..."
+            mv "$BACKUP_FILE" "$TARGET_FILE"
+        else
+            echo "Removing invalid configuration file..."
+            rm "$TARGET_FILE"
+        fi
+        exit 1
     fi
-    exit 1
 fi
 
 # Reload nginx
