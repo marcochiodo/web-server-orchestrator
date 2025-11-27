@@ -374,36 +374,62 @@ else
     die "Failed to deploy stack"
 fi
 
-# Wait for deployment to stabilize
-log "Waiting for services to stabilize (pulling images, starting containers)..."
-sleep 20
+# Wait for deployment to stabilize with polling
+log "Verifying deployment (max 60s wait)..."
 
-# Check deployment status
-log "Verifying deployment..."
+MAX_WAIT=60
+CHECK_INTERVAL=3
+elapsed=0
 
-docker stack services "$SERVICE_NAME" --format '{{.Name}}' | while read -r svc; do
-    REPLICAS=$(docker service ls --filter "name=$svc" --format '{{.Replicas}}')
+while [ $elapsed -lt $MAX_WAIT ]; do
+    ALL_RUNNING=true
+    DEPLOYMENT_FAILED=false
+    SERVICES_LIST=$(docker stack services "$SERVICE_NAME" --format '{{.Name}}')
 
-    # Check if service has running replicas
-    if echo "$REPLICAS" | grep -qE '^[1-9][0-9]*/[0-9]+'; then
-        log "  ✓ Service $svc: $REPLICAS"
-    else
-        # No running replicas - check latest task state
-        LATEST_TASK=$(docker service ps "$svc" --format '{{.CurrentState}}' --filter 'desired-state=running' --no-trunc | head -1)
+    for svc in $SERVICES_LIST; do
+        REPLICAS=$(docker service ls --filter "name=$svc" --format '{{.Replicas}}')
 
-        if echo "$LATEST_TASK" | grep -qE '(Preparing|Starting|Running)'; then
-            log "  ⏳ Service $svc still starting: $REPLICAS - $LATEST_TASK"
-        elif echo "$LATEST_TASK" | grep -qE '(Rejected|Failed|Shutdown)'; then
-            error "Service $svc failed to start: $REPLICAS"
-            docker service ps "$svc" --no-trunc --format 'table {{.Name}}\t{{.CurrentState}}\t{{.Error}}' --filter 'desired-state=running' | head -5 >&2
-            exit 1
-        else
-            log "  ? Service $svc status unclear: $REPLICAS - $LATEST_TASK"
+        # Check if service has running replicas
+        if echo "$REPLICAS" | grep -qE '^[1-9][0-9]*/[0-9]+'; then
+            continue  # Service OK
         fi
+
+        # No running replicas - check latest task state
+        LATEST_TASK=$(docker service ps "$svc" --format '{{.CurrentState}}' --filter 'desired-state=running' --no-trunc 2>/dev/null | head -1)
+
+        if echo "$LATEST_TASK" | grep -qE '(Rejected|Failed)'; then
+            error "Service $svc failed: $REPLICAS"
+            docker service ps "$svc" --no-trunc --format 'table {{.Name}}\t{{.CurrentState}}\t{{.Error}}' --filter 'desired-state=running' 2>&1 | head -5 >&2
+            DEPLOYMENT_FAILED=true
+            break
+        elif echo "$LATEST_TASK" | grep -qE '(Preparing|Starting|Assigned|Accepted)'; then
+            log "  ⏳ $svc: $LATEST_TASK (${elapsed}s/${MAX_WAIT}s)"
+            ALL_RUNNING=false
+        else
+            error "Service $svc in unexpected state: $LATEST_TASK"
+            DEPLOYMENT_FAILED=true
+            break
+        fi
+    done
+
+    if [ "$DEPLOYMENT_FAILED" = "true" ]; then
+        die "Deployment failed - service error detected"
     fi
+
+    if [ "$ALL_RUNNING" = "true" ]; then
+        log "  ✓ All services running"
+        break
+    fi
+
+    sleep $CHECK_INTERVAL
+    elapsed=$((elapsed + CHECK_INTERVAL))
 done
 
-log "Deployment verification completed"
+if [ "$ALL_RUNNING" = "false" ]; then
+    die "Deployment timeout - services did not start within ${MAX_WAIT}s"
+fi
+
+log "Deployment verification completed successfully"
 
 # Update nginx after deploy if stack is new
 if [ "$STACK_EXISTS" = false ]; then
