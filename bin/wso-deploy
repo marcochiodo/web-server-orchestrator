@@ -360,11 +360,7 @@ else
     log "New stack, performing initial deployment..."
 fi
 
-# Update nginx before deploy if stack exists (minimize downtime)
-if [ "$STACK_EXISTS" = true ]; then
-    log "Updating nginx configuration..."
-    sh "${WSO_LIB}/scripts/update-nginx-config.sh" "$SERVICE_NAME" "$TEMP_NGINX_CONFIG"
-fi
+# Skip pre-deployment nginx update (will update after deployment verification)
 
 # Deploy stack
 log "Deploying stack..."
@@ -431,11 +427,9 @@ fi
 
 log "Deployment verification completed successfully"
 
-# Update nginx after deploy if stack is new
-if [ "$STACK_EXISTS" = false ]; then
-    log "Creating nginx configuration..."
-    sh "${WSO_LIB}/scripts/update-nginx-config.sh" "$SERVICE_NAME" "$TEMP_NGINX_CONFIG"
-fi
+# Update nginx configuration now that services are verified running
+log "Updating nginx configuration..."
+sh "${WSO_LIB}/scripts/update-nginx-config.sh" "$SERVICE_NAME" "$TEMP_NGINX_CONFIG"
 
 # Install crontab if provided
 if [ "$HAS_CRONTAB" = true ]; then
