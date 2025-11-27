@@ -1,0 +1,34 @@
+#!/bin/sh
+set -e
+
+MAX_WAIT=${1:-30}  # Timeout in secondi (default 30)
+INTERVAL=2
+
+echo "Verifying nginx service is running..."
+
+# Wait for container to be running
+elapsed=0
+while [ $elapsed -lt $MAX_WAIT ]; do
+    CONTAINER_ID=$(docker ps -q -f name=system_nginx 2>/dev/null || true)
+
+    if [ -n "$CONTAINER_ID" ]; then
+        echo "✓ Nginx container found: $CONTAINER_ID"
+
+        # Verify it's listening on ports
+        if docker exec "$CONTAINER_ID" netstat -tlnp 2>/dev/null | grep -qE ':(80|443)'; then
+            echo "✓ Nginx is listening on ports 80/443"
+            exit 0
+        else
+            echo "⏳ Nginx container running but not yet listening on ports..."
+        fi
+    else
+        echo "⏳ Waiting for nginx container to start... ($elapsed/${MAX_WAIT}s)"
+    fi
+
+    sleep $INTERVAL
+    elapsed=$((elapsed + INTERVAL))
+done
+
+echo "✗ Error: Nginx did not start within ${MAX_WAIT} seconds" >&2
+echo "Check service status with: docker service ps system_nginx" >&2
+exit 1

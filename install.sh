@@ -187,6 +187,7 @@ copy_file "$SCRIPT_DIR/bin/wso-cert-gen-ovh" "/usr/bin/wso-cert-gen-ovh" "wso-ce
 copy_file "$SCRIPT_DIR/bin/wso-cert-renew" "/usr/bin/wso-cert-renew" "wso-cert-renew"
 copy_file "$SCRIPT_DIR/bin/wso-nginx-reload" "/usr/bin/wso-nginx-reload" "wso-nginx-reload"
 copy_file "$SCRIPT_DIR/bin/wso-nginx-restart" "/usr/bin/wso-nginx-restart" "wso-nginx-restart"
+copy_file "$SCRIPT_DIR/bin/wso-nginx-verify" "/usr/bin/wso-nginx-verify" "wso-nginx-verify"
 
 # Make executable
 chmod +x /usr/bin/wso-*
@@ -417,14 +418,28 @@ if docker service ls 2>/dev/null | grep -q "system_nginx"; then
     if [ "$redeploy_system" = "y" ] || [ "$redeploy_system" = "Y" ]; then
         log_info "Deploying system stack..."
         docker stack deploy --compose-file "$SYSTEM_COMPOSE_FILE" "$SYSTEM_STACK_NAME"
-        log_success "System stack redeployed"
+
+        log_info "Verifying nginx is running..."
+        if wso-nginx-verify 30; then
+            log_success "System stack redeployed and verified"
+        else
+            log_error "Nginx verification failed - check 'docker service ps system_nginx'"
+            exit 1
+        fi
     else
         log_info "System stack deployment skipped"
     fi
 else
     log_info "Deploying system stack..."
     docker stack deploy --compose-file "$SYSTEM_COMPOSE_FILE" "$SYSTEM_STACK_NAME"
-    log_success "System stack deployed"
+
+    log_info "Verifying nginx is running..."
+    if wso-nginx-verify 30; then
+        log_success "System stack deployed and verified"
+    else
+        log_error "Nginx verification failed - check 'docker service ps system_nginx'"
+        exit 1
+    fi
 fi
 
 ################################################################################
