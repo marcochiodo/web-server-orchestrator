@@ -1,5 +1,9 @@
 version: '3.8'
 
+# System Stack - Core infrastructure services
+# This stack contains pre-installed system services like nginx reverse proxy
+# Can be extended with other system services (monitoring, logging, etc.)
+
 services:
   nginx:
     image: nginx:1.29-alpine
@@ -20,17 +24,17 @@ services:
         mode: host
     volumes:
       - type: bind
-        source: ${ROOT_DIR}/nginx-conf
+        source: /var/lib/wso/nginx
         target: /etc/nginx/conf.d
       - type: bind
-        source: ${ROOT_DIR}/static/default
+        source: /usr/lib/wso/www-default
         target: /usr/share/nginx/html
       - type: bind
-        source: ${ROOT_DIR}/static/sites
-        target: /usr/share/nginx/sites
-      - type: bind
-        source: ${ROOT_DIR}/data/letsencrypt
+        source: /var/lib/wso/letsencrypt
         target: /etc/letsencrypt
+      - type: bind
+        source: /var/lib/wso/acme-challenge
+        target: /usr/share/nginx/acme-challenge
     networks:
       - wso-net
 

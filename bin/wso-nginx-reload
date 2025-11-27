@@ -1,11 +1,11 @@
 #!/bin/sh
 set -e
 
-# Find nginx container
-NGINX_CONTAINER=$(docker ps -q -f name=nginx)
+# Find nginx container (part of system stack)
+NGINX_CONTAINER=$(docker ps -q -f name=system_nginx)
 
 if [ -z "$NGINX_CONTAINER" ]; then
-    echo "Error: Nginx container not found" >&2
+    echo "Error: Nginx container not found (system stack)" >&2
     exit 1
 fi
 

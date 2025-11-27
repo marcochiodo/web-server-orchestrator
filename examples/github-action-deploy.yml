@@ -1,0 +1,49 @@
+# GitHub Actions - WSO Deployment
+#
+# Required Secrets:
+#   SSH_DEPLOYER_PASSWORD
+#
+# Example Secrets:
+#   API_KEY, BEARER_TOKEN
+#
+# Required Variables:
+#   SSH_KNOWN_HOSTS, WSO_HOST
+#
+# Template variables (use ${VAR} syntax in wso-deploy.yml, interpolated via envsubst):
+#   ENVIRONMENT, API_KEY, BEARER_TOKEN
+
+name: Deploy to WSO
+
+on:
+  push:
+    tags: [test, live]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Setup SSH
+        run: |
+          mkdir -p $HOME/.ssh
+          echo "${{ vars.SSH_KNOWN_HOSTS }}" > $HOME/.ssh/known_hosts
+          chmod 600 $HOME/.ssh/known_hosts
+
+      - name: Build manifest
+        env:
+          ENVIRONMENT: ${{ github.ref_name }}
+          API_KEY: ${{ secrets.API_KEY }}
+          BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
+        run: |
+          envsubst < deployment/wso-deploy.yml > /tmp/manifest.yml
+
+      - name: Deploy
+        env:
+          SSH_PASSWORD: ${{ secrets.SSH_DEPLOYER_PASSWORD }}
+          WSO_HOST: ${{ vars.WSO_HOST }}
+        run: |
+          cat /tmp/manifest.yml | sshpass -p "$SSH_PASSWORD" ssh deployer@${WSO_HOST} "wso-deploy -"
+          rm -f /tmp/manifest.yml

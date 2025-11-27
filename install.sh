@@ -2,20 +2,22 @@
 ################################################################################
 # Web Server Orchestrator (WSO) - Installation Script
 ################################################################################
-# This script automates the setup of a Docker Swarm-based web server with
-# nginx reverse proxy and Let's Encrypt certificate management.
+# Installs WSO following Linux FHS (Filesystem Hierarchy Standard)
 #
-# Features:
-# - Idempotent: Can be safely re-run on already configured servers
-# - File synchronization with checksum verification
-# - Interactive prompts for user-specific configuration
-# - Support for Debian/Ubuntu systems
+# Installation paths:
+#   /usr/bin/wso-*            - Public commands
+#   /usr/lib/wso/             - Libraries and internal scripts
+#   /etc/wso/                 - Configuration
+#   /var/lib/wso/             - Runtime data
+#
+# Usage:
+#   sudo ./install.sh
 ################################################################################
 
 set -e  # Exit on error
 
 ################################################################################
-# Color definitions for output
+# Color definitions
 ################################################################################
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -53,19 +55,6 @@ fi
 log_success "Running as root"
 
 ################################################################################
-# Ask for installation directory
-################################################################################
-echo ""
-log_info "Where would you like to install WSO?"
-read -p "Installation path [/srv/wso]: " INSTALL_DIR
-INSTALL_DIR=${INSTALL_DIR:-/srv/wso}
-
-log_info "Installation directory set to: $INSTALL_DIR"
-
-# Set ROOT_DIR for the rest of the script
-ROOT_DIR="$INSTALL_DIR"
-
-################################################################################
 # Detect OS and package manager
 ################################################################################
 log_info "Detecting operating system..."
@@ -74,8 +63,12 @@ if [ -f /etc/debian_version ]; then
     OS="debian"
     PKG_MANAGER="apt"
     log_success "Detected Debian/Ubuntu system"
+elif [ -f /etc/fedora-release ]; then
+    OS="fedora"
+    PKG_MANAGER="dnf"
+    log_success "Detected Fedora system"
 else
-    log_error "Only Debian/Ubuntu systems are currently supported"
+    log_error "Unsupported OS. WSO supports Debian/Ubuntu and Fedora."
     exit 1
 fi
 
@@ -84,25 +77,15 @@ fi
 ################################################################################
 log_info "Installing required packages..."
 
-# Update package lists
-log_info "Updating package lists..."
-apt update
-
-# Install packages
-PACKAGES="rsync sqlite3 ca-certificates curl docker.io docker-compose"
+if [ "$PKG_MANAGER" = "apt" ]; then
+    apt update
+    PACKAGES="rsync ca-certificates curl docker.io yq fail2ban gettext-base"
+elif [ "$PKG_MANAGER" = "dnf" ]; then
+    PACKAGES="rsync ca-certificates curl docker yq fail2ban gettext"
+fi
 
 log_info "Installing: $PACKAGES"
-apt install -y $PACKAGES
-
-# Install MinIO Client (mc) for S3 backup
-if command -v mc &> /dev/null; then
-    log_success "MinIO client already installed"
-else
-    log_info "Installing MinIO client (mc)..."
-    curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
-    chmod +x /usr/local/bin/mc
-    log_success "MinIO client installed"
-fi
+$PKG_MANAGER install -y $PACKAGES
 
 # Ensure Docker service is running
 systemctl enable docker
@@ -129,23 +112,24 @@ else
 fi
 
 ################################################################################
-# Create directory structure
+# Create directory structure (FHS compliant)
 ################################################################################
 log_info "Creating directory structure..."
 
-mkdir -p "$ROOT_DIR"
-mkdir -p "$ROOT_DIR/scripts"
-mkdir -p "$ROOT_DIR/nginx-conf"
-mkdir -p "$ROOT_DIR/static/default"
-mkdir -p "$ROOT_DIR/static/sites"
-mkdir -p "$ROOT_DIR/services"
+# /usr/lib/wso - Code and libraries
+mkdir -p /usr/lib/wso/scripts
+mkdir -p /usr/lib/wso/docker
+mkdir -p /usr/lib/wso/www-default
 
-# Data directory for runtime data (certificates, databases, assets)
-mkdir -p "$ROOT_DIR/data/letsencrypt"
-mkdir -p "$ROOT_DIR/data/letsencrypt-lib"
-mkdir -p "$ROOT_DIR/data/sqlite"
-mkdir -p "$ROOT_DIR/data/assets"
-mkdir -p "$ROOT_DIR/data/secrets/certbot"
+# /etc/wso - Configuration
+mkdir -p /etc/wso/nginx-includes
+
+# /var/lib/wso - Runtime data
+mkdir -p /var/lib/wso/nginx
+mkdir -p /var/lib/wso/letsencrypt
+mkdir -p /var/lib/wso/letsencrypt-lib
+mkdir -p /var/lib/wso/acme-challenge/.well-known/acme-challenge
+mkdir -p /var/lib/wso/data
 
 log_success "Directory structure created"
 
@@ -192,87 +176,82 @@ copy_file() {
 ################################################################################
 # Copy source files
 ################################################################################
-log_info "Copying source files..."
+log_info "Copying WSO files..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Copy scripts
-copy_file "$SCRIPT_DIR/sources/scripts/deploy-service.sh" "$ROOT_DIR/deploy-service.sh" "deploy-service.sh"
-copy_file "$SCRIPT_DIR/sources/scripts/nginx-reload.sh" "$ROOT_DIR/scripts/nginx-reload.sh" "nginx-reload.sh"
-copy_file "$SCRIPT_DIR/sources/scripts/update-nginx-config.sh" "$ROOT_DIR/scripts/update-nginx-config.sh" "update-nginx-config.sh"
-copy_file "$SCRIPT_DIR/sources/scripts/certbot-gen.sh" "$ROOT_DIR/scripts/certbot-gen.sh" "certbot-gen.sh"
-copy_file "$SCRIPT_DIR/sources/scripts/certbot-gen-ovh.sh" "$ROOT_DIR/scripts/certbot-gen-ovh.sh" "certbot-gen-ovh.sh"
-copy_file "$SCRIPT_DIR/sources/scripts/certbot-renew.sh" "$ROOT_DIR/scripts/certbot-renew.sh" "certbot-renew.sh"
+# Copy public commands to /usr/bin
+copy_file "$SCRIPT_DIR/bin/wso-deploy" "/usr/bin/wso-deploy" "wso-deploy"
+copy_file "$SCRIPT_DIR/bin/wso-cert-gen" "/usr/bin/wso-cert-gen" "wso-cert-gen"
+copy_file "$SCRIPT_DIR/bin/wso-cert-gen-ovh" "/usr/bin/wso-cert-gen-ovh" "wso-cert-gen-ovh"
+copy_file "$SCRIPT_DIR/bin/wso-cert-renew" "/usr/bin/wso-cert-renew" "wso-cert-renew"
+copy_file "$SCRIPT_DIR/bin/wso-nginx-reload" "/usr/bin/wso-nginx-reload" "wso-nginx-reload"
 
-# Make scripts executable
-chmod +x "$ROOT_DIR/deploy-service.sh" 2>/dev/null || true
-chmod +x "$ROOT_DIR/scripts/"*.sh 2>/dev/null || true
+# Make executable
+chmod +x /usr/bin/wso-*
 
-# Copy nginx configuration files
-copy_file "$SCRIPT_DIR/sources/nginx/default.conf" "$ROOT_DIR/nginx-conf/default.conf" "default.conf"
-copy_file "$SCRIPT_DIR/sources/nginx/ssl-common.conf" "$ROOT_DIR/nginx-conf/ssl-common.conf" "ssl-common.conf"
-copy_file "$SCRIPT_DIR/sources/nginx/proxy-common.conf" "$ROOT_DIR/nginx-conf/proxy-common.conf" "proxy-common.conf"
+# Copy internal scripts to /usr/lib/wso/scripts
+copy_file "$SCRIPT_DIR/lib/scripts/generate-nginx-config.sh" "/usr/lib/wso/scripts/generate-nginx-config.sh" "generate-nginx-config.sh"
+copy_file "$SCRIPT_DIR/lib/scripts/generate-crontab.sh" "/usr/lib/wso/scripts/generate-crontab.sh" "generate-crontab.sh"
+copy_file "$SCRIPT_DIR/lib/scripts/update-nginx-config.sh" "/usr/lib/wso/scripts/update-nginx-config.sh" "update-nginx-config.sh"
+copy_file "$SCRIPT_DIR/lib/scripts/cat-global-secret.sh" "/usr/lib/wso/scripts/cat-global-secret.sh" "cat-global-secret.sh"
 
-# Copy static files
-copy_file "$SCRIPT_DIR/sources/static/index.html" "$ROOT_DIR/static/default/index.html" "default index.html"
+chmod +x /usr/lib/wso/scripts/*.sh
 
-# Copy cron script
-copy_file "$SCRIPT_DIR/sources/scripts/certbot-cron.sh" "/etc/cron.daily/certbot-renew" "certbot cron job"
-chmod +x /etc/cron.daily/certbot-renew 2>/dev/null || true
+# Copy docker compose
+copy_file "$SCRIPT_DIR/lib/docker/system-compose.yml" "/usr/lib/wso/docker/system-compose.yml" "system-compose.yml"
 
-log_success "Source files copied"
+# Copy nginx configuration files to /var/lib/wso/nginx
+copy_file "$SCRIPT_DIR/lib/nginx/default.conf" "/var/lib/wso/nginx/default.conf" "nginx default.conf"
+copy_file "$SCRIPT_DIR/lib/nginx/ssl-common.conf" "/etc/wso/nginx-includes/ssl-common.conf" "ssl-common.conf"
+copy_file "$SCRIPT_DIR/lib/nginx/proxy-common.conf" "/etc/wso/nginx-includes/proxy-common.conf" "proxy-common.conf"
+
+# Copy static default website
+copy_file "$SCRIPT_DIR/lib/www-default/index.html" "/usr/lib/wso/www-default/index.html" "default index.html"
+
+log_success "WSO files copied"
 
 ################################################################################
-# Check SSH password authentication configuration
+# Configure wso.conf
 ################################################################################
-log_info "Checking SSH password authentication..."
+log_info "Configuring WSO..."
 
-# Check current SSH configuration
-if sshd -T 2>/dev/null | grep -q "^passwordauthentication yes"; then
-    log_success "SSH password authentication is already enabled"
+if [ ! -f "/etc/wso/wso.conf" ]; then
+    echo ""
+    log_info "Default domain configuration for service subdomains"
+    read -p "Enter default domain [chdev.eu]: " CHDEV_DOMAIN
+    CHDEV_DOMAIN=${CHDEV_DOMAIN:-chdev.eu}
+
+    cat > /etc/wso/wso.conf <<EOF
+# WSO Global Configuration
+# Default domain for service subdomains (e.g., service-name.chdev.eu)
+CHDEV_DOMAIN=$CHDEV_DOMAIN
+EOF
+
+    log_success "WSO configuration created"
 else
-    echo ""
-    log_warning "SSH password authentication is currently disabled."
-    log_info "This is common on Debian/cloud systems and will prevent the 'deployer' user from logging in via SSH with password."
-    echo ""
-    read -p "Do you want to enable SSH password authentication? [y/N]: " -n 1 -r
-    echo
-
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        # Create sshd_config.d directory if it doesn't exist
-        mkdir -p /etc/ssh/sshd_config.d
-
-        # Copy WSO SSH configuration file
-        copy_file "$SCRIPT_DIR/sources/ssh/10-wso.conf" "/etc/ssh/sshd_config.d/10-wso.conf" "WSO SSH configuration"
-
-        log_info "Restarting SSH service..."
-        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
-        log_success "SSH password authentication enabled"
-    else
-        log_info "SSH configuration unchanged. You can use SSH keys for authentication."
-        log_info "To add SSH keys: ssh-copy-id deployer@your-server"
-    fi
+    log_info "WSO configuration already exists"
 fi
 
 ################################################################################
-# Configure sudoers for deployer
+# Configure sudoers
 ################################################################################
 log_info "Configuring sudoers for deployer..."
 
-SUDOERS_FILE="/etc/sudoers.d/deployer-deploy"
-SUDOERS_TEMP="/tmp/deployer-deploy.tmp.$$"
+SUDOERS_FILE="/etc/sudoers.d/wso-deployer"
+SUDOERS_TEMP="/tmp/wso-deployer.tmp.$$"
 
-# Create temporary sudoers file with ROOT_DIR replaced
-sed "s|ROOT_DIR|$ROOT_DIR|g" "$SCRIPT_DIR/sources/sudoers/deployer-deploy" > "$SUDOERS_TEMP"
+# Copy sudoers file
+cp "$SCRIPT_DIR/etc/sudoers.d/wso-deployer" "$SUDOERS_TEMP"
 
 # Verify syntax with visudo
 if ! visudo -c -f "$SUDOERS_TEMP" >/dev/null 2>&1; then
-    log_error "Sudoers file has invalid syntax! This should not happen."
+    log_error "Sudoers file has invalid syntax!"
     rm -f "$SUDOERS_TEMP"
     exit 1
 fi
 
-# If destination doesn't exist, install it
+# Install sudoers file
 if [ ! -f "$SUDOERS_FILE" ]; then
     install -m 0440 "$SUDOERS_TEMP" "$SUDOERS_FILE"
     rm -f "$SUDOERS_TEMP"
@@ -286,17 +265,8 @@ else
         log_info "Unchanged: sudoers configuration"
         rm -f "$SUDOERS_TEMP"
     else
-        # Files differ, ask user
         echo ""
-        log_warning "Sudoers configuration differs from repository version"
-        log_info "Current: $SUDOERS_FILE"
-        echo ""
-        echo "--- Current version ---"
-        cat "$SUDOERS_FILE"
-        echo ""
-        echo "--- New version ---"
-        cat "$SUDOERS_TEMP"
-        echo ""
+        log_warning "Sudoers configuration differs"
         read -p "Do you want to update it? [y/N]: " -n 1 -r
         echo
 
@@ -311,14 +281,52 @@ else
 fi
 
 ################################################################################
-# Hide /srv from other users
+# Configure SSH
 ################################################################################
-log_info "Setting permissions on /srv..."
-chmod -R o-rwx /srv 2>/dev/null || true
+log_info "Checking SSH password authentication..."
 
-log_info "Setting permissions 755 for $ROOT_DIR/static..."
-chmod -R 755 "$ROOT_DIR/static"
-log_success "Permissions set"
+if sshd -T 2>/dev/null | grep -q "^passwordauthentication yes"; then
+    log_success "SSH password authentication is already enabled"
+else
+    echo ""
+    log_warning "SSH password authentication is currently disabled."
+    read -p "Do you want to enable SSH password authentication? [y/N]: " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        mkdir -p /etc/ssh/sshd_config.d
+        copy_file "$SCRIPT_DIR/etc/ssh/10-wso.conf" "/etc/ssh/sshd_config.d/10-wso.conf" "WSO SSH configuration"
+
+        log_info "Restarting SSH service..."
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
+        log_success "SSH password authentication enabled"
+    else
+        log_info "SSH configuration unchanged"
+    fi
+fi
+
+################################################################################
+# Configure fail2ban
+################################################################################
+log_info "Configuring fail2ban for SSH protection..."
+
+copy_file "$SCRIPT_DIR/etc/fail2ban/jail.local" "/etc/fail2ban/jail.local" "fail2ban jail.local"
+
+log_info "Starting fail2ban service..."
+systemctl enable fail2ban
+systemctl restart fail2ban
+
+log_success "fail2ban configured and running"
+
+################################################################################
+# Install cron job for certificate renewal
+################################################################################
+log_info "Installing certificate renewal cron job..."
+
+copy_file "$SCRIPT_DIR/etc/cron.d/wso-cert-renew" "/etc/cron.d/wso-cert-renew" "wso-cert-renew cron"
+chmod 644 /etc/cron.d/wso-cert-renew
+
+log_success "Certificate renewal cron job installed"
 
 ################################################################################
 # Docker registry login
@@ -326,7 +334,6 @@ log_success "Permissions set"
 echo ""
 log_info "Docker registry configuration"
 
-# Check if Docker credentials already exist
 if [ -f ~/.docker/config.json ] && grep -q '"auths"' ~/.docker/config.json 2>/dev/null; then
     log_success "Docker registry credentials already configured"
 else
@@ -373,7 +380,7 @@ else
 fi
 
 ################################################################################
-# Create overlay network for service communication
+# Create overlay network
 ################################################################################
 log_info "Checking overlay network..."
 
@@ -386,40 +393,66 @@ else
 fi
 
 ################################################################################
-# Deploy nginx stack
+# Deploy system stack
 ################################################################################
-log_info "Checking nginx stack..."
+log_info "Checking system stack..."
 
-NGINX_STACK_NAME="nginx"
-NGINX_COMPOSE_FILE="$SCRIPT_DIR/sources/docker-stack/nginx-compose.yml"
+SYSTEM_STACK_NAME="system"
+SYSTEM_COMPOSE_FILE="/usr/lib/wso/docker/system-compose.yml"
 
-# Check if nginx service already exists
-if docker service ls 2>/dev/null | grep -q "nginx"; then
-    log_success "Nginx service already exists"
+if docker service ls 2>/dev/null | grep -q "system_nginx"; then
+    log_success "System stack already exists"
 
-    # Get current nginx image
-    CURRENT_IMAGE=$(docker service inspect nginx --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' 2>/dev/null | cut -d@ -f1)
+    CURRENT_IMAGE=$(docker service inspect system_nginx --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' 2>/dev/null | cut -d@ -f1)
 
     echo ""
     echo "Current nginx image: $CURRENT_IMAGE"
     echo "Target nginx image:  nginx:1.29-alpine"
     echo ""
 
-    read -p "Do you want to redeploy the nginx stack? This will update the configuration. (y/N): " redeploy_nginx
+    read -p "Do you want to redeploy the system stack? [y/N]: " redeploy_system
 
-    if [ "$redeploy_nginx" = "y" ] || [ "$redeploy_nginx" = "Y" ]; then
-        log_info "Deploying nginx stack..."
-        cd "$SCRIPT_DIR"
-        ROOT_DIR="$ROOT_DIR" docker stack config -c "$NGINX_COMPOSE_FILE" | docker stack deploy --compose-file - "$NGINX_STACK_NAME"
-        log_success "Nginx stack redeployed"
+    if [ "$redeploy_system" = "y" ] || [ "$redeploy_system" = "Y" ]; then
+        log_info "Deploying system stack..."
+        docker stack deploy --compose-file "$SYSTEM_COMPOSE_FILE" "$SYSTEM_STACK_NAME"
+        log_success "System stack redeployed"
     else
-        log_info "Nginx stack deployment skipped"
+        log_info "System stack deployment skipped"
     fi
 else
-    log_info "Deploying nginx stack..."
-    cd "$SCRIPT_DIR"
-    ROOT_DIR="$ROOT_DIR" docker stack config -c "$NGINX_COMPOSE_FILE" | docker stack deploy --compose-file - "$NGINX_STACK_NAME"
-    log_success "Nginx stack deployed"
+    log_info "Deploying system stack..."
+    docker stack deploy --compose-file "$SYSTEM_COMPOSE_FILE" "$SYSTEM_STACK_NAME"
+    log_success "System stack deployed"
+fi
+
+################################################################################
+# Generate wildcard certificate for chdev.eu
+################################################################################
+echo ""
+log_info "Checking wildcard certificate for $CHDEV_DOMAIN..."
+
+CHDEV_CERT_PATH="/var/lib/wso/letsencrypt/live/$CHDEV_DOMAIN/fullchain.pem"
+
+if [ -f "$CHDEV_CERT_PATH" ]; then
+    log_success "Certificate for $CHDEV_DOMAIN already exists"
+
+    read -p "Do you want to regenerate the $CHDEV_DOMAIN wildcard certificate? [y/N]: " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Generating wildcard certificate for $CHDEV_DOMAIN..."
+        wso-cert-gen-ovh "$CHDEV_DOMAIN,*.$CHDEV_DOMAIN"
+        log_success "Wildcard certificate for $CHDEV_DOMAIN generated"
+    fi
+else
+    read -p "Do you want to generate the $CHDEV_DOMAIN wildcard certificate? [y/N]: " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Generating wildcard certificate for $CHDEV_DOMAIN..."
+        wso-cert-gen-ovh "$CHDEV_DOMAIN,*.$CHDEV_DOMAIN"
+        log_success "Wildcard certificate for $CHDEV_DOMAIN generated"
+    fi
 fi
 
 ################################################################################
@@ -430,22 +463,31 @@ echo "==========================================================================
 log_success "WSO Installation Complete!"
 echo "================================================================================"
 echo ""
-log_info "Installation directory: $ROOT_DIR"
-log_info "Deployer user: deployer"
-log_info "Docker Swarm: active"
-log_info "Nginx service: running"
+log_info "Installed components:"
+echo "  Commands:      /usr/bin/wso-*"
+echo "  Libraries:     /usr/lib/wso/"
+echo "  Configuration: /etc/wso/"
+echo "  Data:          /var/lib/wso/"
+echo ""
+log_info "System status:"
+echo "  Deployer user: deployer"
+echo "  Docker Swarm:  active"
+echo "  System stack:  running"
+echo "  fail2ban:      active (SSH protection)"
 echo ""
 log_info "Next steps:"
-echo "  1. Place your nginx configurations in: $ROOT_DIR/nginx-conf/"
+echo "  1. Deploy a service:"
+echo "     wso-deploy manifest.yml"
+echo ""
 echo "  2. Generate SSL certificates:"
-echo "     - Webroot: $ROOT_DIR/scripts/certbot-gen.sh domain.com"
-echo "     - Wildcard (OVH DNS): $ROOT_DIR/scripts/certbot-gen-ovh.sh '*.domain.com,domain.com'"
-echo "  3. Reload nginx: $ROOT_DIR/scripts/nginx-reload.sh"
-echo "  4. Deploy services: sudo sh $ROOT_DIR/deploy-service.sh <project-name>"
+echo "     wso-cert-gen domain.com"
+echo "     wso-cert-gen-ovh '*.domain.com,domain.com'"
 echo ""
-log_info "Example nginx templates are available in the repository under sources/nginx/"
+echo "  3. Reload nginx:"
+echo "     wso-nginx-reload"
 echo ""
-log_info "To update the nginx stack:"
-echo "  cd $SCRIPT_DIR && ROOT_DIR=$ROOT_DIR docker stack config -c sources/docker-stack/nginx-compose.yml | docker stack deploy --compose-file - nginx"
+log_info "Documentation:"
+echo "  Example manifest: $SCRIPT_DIR/examples/wso-deploy.yml"
+echo "  GitHub Actions:   $SCRIPT_DIR/examples/github-action-deploy.yml"
 echo ""
 echo "================================================================================"

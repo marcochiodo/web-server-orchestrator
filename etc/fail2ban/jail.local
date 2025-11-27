@@ -1,0 +1,15 @@
+[DEFAULT]
+# Ban per 1 ora
+bantime = 1h
+
+# Finestra di 10 minuti per contare i tentativi
+findtime = 10m
+
+# Ban dopo 5 tentativi falliti
+maxretry = 5
+
+[sshd]
+enabled = true
+port = ssh
+logpath = %(sshd_log)s
+backend = %(sshd_backend)s

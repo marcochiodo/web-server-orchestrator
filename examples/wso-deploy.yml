@@ -1,0 +1,63 @@
+# WSO Deployment Manifest v2.0
+#
+# Variables use standard ${VAR} syntax for envsubst interpolation
+
+version: "2.0"
+
+service: myapp-${ENVIRONMENT}
+
+# UID for service data directory (optional, default: 1000)
+data_uid: 1000
+
+# Docker stack configuration
+stack:
+  version: '3.8'
+  services:
+    webapp:
+      image: registry.com/myapp:${ENVIRONMENT}
+
+      deploy:
+        replicas: 1
+        restart_policy:
+          condition: on-failure
+          delay: 5s
+          max_attempts: 3
+
+      environment:
+        - API_KEY=${API_KEY}
+
+      volumes:
+        - type: bind
+          source: /var/lib/wso/data/myapp-${ENVIRONMENT}
+          target: /data
+
+      networks:
+        - wso-net
+
+  networks:
+    wso-net:
+      external: true
+
+# Host secrets (systemd-creds, for cron jobs)
+secrets:
+  bearer_token: "${BEARER_TOKEN}"
+
+# Nginx configuration (auto-generated from domains)
+force_https: true
+domains:
+  - domain: example.com
+    cert_name: myapp-staging_example.com
+    container_name: webapp
+    port: 8080
+
+  - domain: www.example.com
+    cert_name: myapp-staging_www.example.com
+    container_name: webapp
+    port: 8080
+
+# Cron jobs
+cron_jobs:
+  - schedule: "0 2 * * *"
+    command: "curl -H \"Authorization: Bearer $BEARER_TOKEN\" https://api.example.com/backup"
+    secrets:
+      BEARER_TOKEN: bearer_token

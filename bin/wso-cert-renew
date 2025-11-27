@@ -1,0 +1,29 @@
+#!/bin/sh
+
+# WSO Certificate Renewer
+# Renews all Let's Encrypt certificates
+# Should be called daily via cron
+
+# WSO Paths (hardcoded)
+readonly CERT_DIR="/var/lib/wso/letsencrypt"
+readonly CERT_LIB_DIR="/var/lib/wso/letsencrypt-lib"
+readonly ACME_DIR="/var/lib/wso/acme-challenge"
+
+echo "[WSO] Starting certificate renewal check..."
+
+# Run certbot renew
+sudo docker run --rm --name certbot-renew \
+  -v "${CERT_DIR}:/etc/letsencrypt" \
+  -v "${CERT_LIB_DIR}:/var/lib/letsencrypt" \
+  -v "${ACME_DIR}:/srv/webroot" \
+  certbot/certbot renew --webroot -w /srv/webroot
+
+# Reload nginx if certificates were renewed
+if [ $? -eq 0 ]; then
+    echo "[WSO] Certificate renewal completed"
+    echo "[WSO] Reloading nginx..."
+    wso-nginx-reload
+else
+    echo "[WSO] Certificate renewal failed" >&2
+    exit 1
+fi

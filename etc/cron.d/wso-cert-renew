@@ -1,0 +1,8 @@
+# WSO - Rinnovo certificati SSL giornaliero
+# Controlla e rinnova tutti i certificati Let's Encrypt
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# Esegui rinnovo certificati ogni giorno alle 3 AM
+0 3 * * * root /usr/bin/wso-cert-renew

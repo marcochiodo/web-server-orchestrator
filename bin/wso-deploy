@@ -1,0 +1,403 @@
+#!/bin/sh
+set -eu
+
+# WSO Manifest-based Deployment System v2.0
+# Deploys services using YAML manifest with embedded files and host secrets
+#
+# Usage:
+#   wso-deploy <path-to-manifest.yml>
+#   wso-deploy - < manifest.yml
+#   cat manifest.yml | wso-deploy -
+#
+# Manifest format: see examples/wso-deploy.yml
+
+# =============================================================================
+# WSO Paths (hardcoded)
+# =============================================================================
+
+readonly WSO_LIB="/usr/lib/wso"
+readonly WSO_DATA="/var/lib/wso"
+readonly WSO_ETC="/etc/wso"
+readonly DATA_DIR="${WSO_DATA}/data"
+readonly NGINX_CONF_DIR="${WSO_DATA}/nginx"
+readonly CERT_DIR="${WSO_DATA}/letsencrypt"
+readonly ACME_DIR="${WSO_DATA}/acme-challenge"
+readonly DEFAULT_DATA_UID=1000
+
+# =============================================================================
+# Utilities
+# =============================================================================
+
+log() {
+    printf "[WSO] %s\n" "$*"
+}
+
+error() {
+    printf "[WSO ERROR] %s\n" "$*" >&2
+}
+
+die() {
+    error "$@"
+    exit 1
+}
+
+check_yq() {
+    if ! command -v yq >/dev/null 2>&1; then
+        die "yq is not installed. Install with: sudo dnf install yq"
+    fi
+}
+
+# =============================================================================
+# Setup
+# =============================================================================
+
+if [ $# -lt 1 ]; then
+    cat >&2 <<EOF
+Usage: $0 <path-to-manifest.yml>
+   Or: $0 - < manifest.yml
+
+Examples:
+  $0 /tmp/deploy.yml
+  cat deploy.yml | $0 -
+EOF
+    exit 1
+fi
+
+check_yq
+
+MANIFEST_PATH="$1"
+shift
+
+# =============================================================================
+# Read Manifest
+# =============================================================================
+
+TEMP_MANIFEST=""
+
+if [ "$MANIFEST_PATH" = "-" ]; then
+    log "Reading manifest from stdin..."
+    TEMP_MANIFEST="/tmp/wso-manifest-$$.yml"
+    cat > "$TEMP_MANIFEST"
+    if [ ! -s "$TEMP_MANIFEST" ]; then
+        rm -f "$TEMP_MANIFEST"
+        die "No manifest content received from stdin"
+    fi
+    MANIFEST_PATH="$TEMP_MANIFEST"
+else
+    if [ ! -f "$MANIFEST_PATH" ]; then
+        die "Manifest file not found: $MANIFEST_PATH"
+    fi
+    log "Reading manifest from: $MANIFEST_PATH"
+fi
+
+# =============================================================================
+# Parse Manifest
+# =============================================================================
+
+parse_manifest() {
+    yq eval "$1" "$MANIFEST_PATH"
+}
+
+MANIFEST_VERSION="$(parse_manifest '.version')"
+if [ "$MANIFEST_VERSION" != "2.0" ]; then
+    die "Unsupported manifest version: $MANIFEST_VERSION (expected 2.0)"
+fi
+
+log "Parsing manifest (version $MANIFEST_VERSION)..."
+
+# Extract service configuration
+SERVICE_NAME="$(parse_manifest '.service')"
+
+[ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" = "null" ] && die "service is required"
+
+log "  Service: $SERVICE_NAME"
+
+# =============================================================================
+# Extract Stack Configuration from Manifest
+# =============================================================================
+
+TEMP_STACK_COMPOSE="/tmp/${SERVICE_NAME}-stack-$$.yml"
+TEMP_NGINX_CONFIG="/tmp/${SERVICE_NAME}-nginx-$$.conf"
+TEMP_CRONTAB="/tmp/${SERVICE_NAME}-crontab-$$.txt"
+
+cleanup() {
+    rm -f "$TEMP_STACK_COMPOSE" "$TEMP_NGINX_CONFIG" "$TEMP_CRONTAB" "$TEMP_MANIFEST"
+}
+trap cleanup EXIT INT TERM
+
+log "Extracting stack configuration from manifest..."
+
+# Extract stack section (required)
+if ! yq eval '.stack' "$MANIFEST_FILE" > "$TEMP_STACK_COMPOSE" 2>/dev/null; then
+    die "Failed to extract .stack from manifest"
+fi
+
+# Verify stack section exists and is not empty
+if [ ! -s "$TEMP_STACK_COMPOSE" ] || grep -q "^null$" "$TEMP_STACK_COMPOSE"; then
+    die "stack section is required in manifest"
+fi
+
+# Check for unresolved placeholders
+if grep -q '{{.*}}' "$TEMP_STACK_COMPOSE"; then
+    die "stack section contains unresolved placeholder {{...}}. GitHub Action must substitute all placeholders."
+fi
+
+log "  ✓ Stack configuration extracted"
+
+# =============================================================================
+# Manage Host Secrets (systemd-creds)
+# =============================================================================
+
+manage_host_secrets() {
+    log "Managing host secrets (systemd-creds)..."
+
+    CREDSTORE_DIR="/etc/credstore.encrypted"
+    if [ ! -d "$CREDSTORE_DIR" ]; then
+        mkdir -p "$CREDSTORE_DIR" || die "Failed to create $CREDSTORE_DIR"
+        chmod 755 "$CREDSTORE_DIR"
+    fi
+
+    SECRET_COUNT="$(parse_manifest '.secrets | length')"
+    if [ "$SECRET_COUNT" = "0" ] || [ "$SECRET_COUNT" = "null" ]; then
+        log "  No host secrets defined"
+        return 0
+    fi
+
+    log "  Found $SECRET_COUNT host secret(s) to manage"
+
+    SECRETS_TEMP="/tmp/wso-secrets-$$.txt"
+    parse_manifest '.secrets | to_entries | .[] | .key + "=" + .value' > "$SECRETS_TEMP"
+
+    while IFS='=' read -r secret_name secret_value; do
+        [ -z "$secret_name" ] && continue
+
+        if echo "$secret_value" | grep -q '{{.*}}'; then
+            rm -f "$SECRETS_TEMP"
+            die "Host secret '$secret_name' has unresolved placeholder: $secret_value"
+        fi
+
+        CRED_NAME="${SERVICE_NAME}_${secret_name}"
+        CRED_FILE="${CREDSTORE_DIR}/${CRED_NAME}.cred"
+
+        NEW_HASH="$(echo -n "$secret_value" | sha256sum | cut -d' ' -f1)"
+
+        if [ -f "$CRED_FILE" ]; then
+            HASH_FILE="${CRED_FILE}.hash"
+            OLD_HASH=""
+            if [ -f "$HASH_FILE" ]; then
+                OLD_HASH="$(cat "$HASH_FILE")"
+            fi
+
+            if [ "$NEW_HASH" = "$OLD_HASH" ]; then
+                log "  ✓ Secret '$CRED_NAME' unchanged"
+                continue
+            else
+                log "  ↻ Secret '$CRED_NAME' changed, updating..."
+            fi
+        else
+            log "  + Creating secret '$CRED_NAME'..."
+        fi
+
+        TEMP_CRED="/tmp/${CRED_NAME}-$$.cred"
+        if ! echo -n "$secret_value" | systemd-creds encrypt --name="${CRED_NAME}" - "$TEMP_CRED" 2>/dev/null; then
+            rm -f "$SECRETS_TEMP" "$TEMP_CRED"
+            die "Failed to encrypt secret '$CRED_NAME'. Ensure systemd-creds is available."
+        fi
+
+        mv "$TEMP_CRED" "$CRED_FILE" || {
+            rm -f "$SECRETS_TEMP" "$TEMP_CRED"
+            die "Failed to save credential to $CRED_FILE"
+        }
+
+        chmod 644 "$CRED_FILE"
+        echo "$NEW_HASH" > "${CRED_FILE}.hash"
+        chmod 644 "${CRED_FILE}.hash"
+
+        log "  ✓ Secret '$CRED_NAME' saved"
+    done < "$SECRETS_TEMP"
+
+    rm -f "$SECRETS_TEMP"
+    log "Host secrets management completed"
+}
+
+# =============================================================================
+# Generate SSL Certificates
+# =============================================================================
+
+generate_ssl_certificates() {
+    log "Checking SSL certificates for domains..."
+
+    DOMAINS_COUNT="$(parse_manifest '.domains | length')"
+
+    if [ "$DOMAINS_COUNT" = "0" ] || [ "$DOMAINS_COUNT" = "null" ]; then
+        log "  No domains defined, skipping certificate generation"
+        return 0
+    fi
+
+    log "  Found $DOMAINS_COUNT domain(s)"
+
+    i=0
+    while [ $i -lt "$DOMAINS_COUNT" ]; do
+        DOMAIN="$(parse_manifest ".domains[$i].domain")"
+        CERT_NAME="$(parse_manifest ".domains[$i].cert_name // \"${SERVICE_NAME}_${DOMAIN}\"")"
+
+        if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "null" ]; then
+            error "Domain at index $i is empty, skipping"
+            i=$((i + 1))
+            continue
+        fi
+
+        CERT_PATH="${CERT_DIR}/live/${CERT_NAME}/fullchain.pem"
+
+        if [ -f "$CERT_PATH" ]; then
+            log "  ✓ Certificate for '$DOMAIN' exists (cert: $CERT_NAME)"
+        else
+            log "  + Generating certificate for '$DOMAIN' (cert: $CERT_NAME)..."
+
+            if wso-cert-gen "$DOMAIN" "$CERT_NAME"; then
+                log "  ✓ Certificate generated successfully"
+            else
+                die "Failed to generate certificate for '$DOMAIN'"
+            fi
+        fi
+
+        i=$((i + 1))
+    done
+
+    log "SSL certificates check completed"
+}
+
+# =============================================================================
+# Generate Nginx Configuration
+# =============================================================================
+
+generate_nginx_config() {
+    log "Generating nginx configuration..."
+
+    if ! sh "${WSO_LIB}/scripts/generate-nginx-config.sh" "$SERVICE_NAME" "$MANIFEST_PATH" "$TEMP_NGINX_CONFIG"; then
+        die "Failed to generate nginx configuration"
+    fi
+
+    log "  ✓ Nginx configuration generated"
+}
+
+# =============================================================================
+# Generate Crontab
+# =============================================================================
+
+generate_crontab() {
+    log "Generating crontab..."
+
+    if sh "${WSO_LIB}/scripts/generate-crontab.sh" "$SERVICE_NAME" "$MANIFEST_PATH" "$TEMP_CRONTAB"; then
+        # Check if crontab has content (more than just header)
+        if [ -s "$TEMP_CRONTAB" ] && grep -q "^[^#]" "$TEMP_CRONTAB" 2>/dev/null; then
+            HAS_CRONTAB=true
+            log "  ✓ Crontab generated"
+        else
+            HAS_CRONTAB=false
+            log "  No cron jobs defined"
+        fi
+    else
+        die "Failed to generate crontab"
+    fi
+}
+
+# =============================================================================
+# Deployment
+# =============================================================================
+
+log "========================================"
+log "WSO Deployment Starting"
+log "========================================"
+log "Service: ${SERVICE_NAME}"
+log "========================================"
+
+# Manage host secrets
+manage_host_secrets
+
+# Generate SSL certificates
+generate_ssl_certificates
+
+# Generate nginx configuration
+generate_nginx_config
+
+# Generate crontab
+HAS_CRONTAB=false
+generate_crontab
+
+# Check if stack exists
+STACK_EXISTS=false
+if docker stack ls --format '{{.Name}}' | grep -q "^${SERVICE_NAME}$"; then
+    STACK_EXISTS=true
+    log "Stack exists, performing update..."
+else
+    log "New stack, performing initial deployment..."
+fi
+
+# Update nginx before deploy if stack exists (minimize downtime)
+if [ "$STACK_EXISTS" = true ]; then
+    log "Updating nginx configuration..."
+    sh "${WSO_LIB}/scripts/update-nginx-config.sh" "$SERVICE_NAME" "$TEMP_NGINX_CONFIG"
+fi
+
+# Deploy stack
+log "Deploying stack..."
+if docker stack deploy --with-registry-auth --compose-file "$TEMP_STACK_COMPOSE" "$SERVICE_NAME"; then
+    log "  ✓ Stack deployed successfully"
+else
+    die "Failed to deploy stack"
+fi
+
+# Update nginx after deploy if stack is new
+if [ "$STACK_EXISTS" = false ]; then
+    log "Waiting for services to start..."
+    sleep 5
+    log "Creating nginx configuration..."
+    sh "${WSO_LIB}/scripts/update-nginx-config.sh" "$SERVICE_NAME" "$TEMP_NGINX_CONFIG"
+fi
+
+# Install crontab if provided
+if [ "$HAS_CRONTAB" = true ]; then
+    log "Installing crontab..."
+    CRON_FILE="/etc/cron.d/${SERVICE_NAME}"
+
+    if [ -f "$CRON_FILE" ]; then
+        OLD_HASH="$(sha256sum "$CRON_FILE" | cut -d' ' -f1)"
+        NEW_HASH="$(sha256sum "$TEMP_CRONTAB" | cut -d' ' -f1)"
+
+        if [ "$OLD_HASH" = "$NEW_HASH" ]; then
+            log "  ✓ Crontab unchanged"
+        else
+            log "  ↻ Crontab changed, updating..."
+            cp "$TEMP_CRONTAB" "$CRON_FILE" || die "Failed to install crontab"
+            chmod 644 "$CRON_FILE"
+            log "  ✓ Crontab updated"
+        fi
+    else
+        log "  + Installing new crontab..."
+        cp "$TEMP_CRONTAB" "$CRON_FILE" || die "Failed to install crontab"
+        chmod 644 "$CRON_FILE"
+        log "  ✓ Crontab installed"
+    fi
+fi
+
+log "========================================"
+log "Deployment Completed Successfully"
+log "========================================"
+log "Service: ${SERVICE_NAME}"
+log ""
+log "Useful commands:"
+log "  docker stack services ${SERVICE_NAME}"
+log "  docker stack ps ${SERVICE_NAME} --no-trunc"
+log "  docker service logs -f ${SERVICE_NAME}_<service>"
+log "  docker stack rm ${SERVICE_NAME}"
+log ""
+log "Host secrets (systemd-creds, namespaced as ${SERVICE_NAME}_*):"
+log "  ls -la /etc/credstore.encrypted/${SERVICE_NAME}_*"
+log "  sh /srv/wso/scripts/cat-global-secret.sh ${SERVICE_NAME} <secret_name>"
+if [ "$HAS_CRONTAB" = true ]; then
+    log ""
+    log "Crontab:"
+    log "  cat /etc/cron.d/${SERVICE_NAME}"
+fi
+log "========================================"

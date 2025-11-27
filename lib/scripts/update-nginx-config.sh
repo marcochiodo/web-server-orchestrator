@@ -24,8 +24,10 @@ fi
 
 SERVICE_NAME="$1"
 SOURCE_FILE="$2"
-ROOT_DIR="${ROOT_DIR:-/srv/wso}"
-TARGET_FILE="$ROOT_DIR/nginx-conf/${SERVICE_NAME}.conf"
+
+# WSO Paths (hardcoded)
+readonly NGINX_CONF_DIR="/var/lib/wso/nginx"
+TARGET_FILE="${NGINX_CONF_DIR}/${SERVICE_NAME}.conf"
 BACKUP_FILE="${TARGET_FILE}.backup"
 
 # Validate service name (alphanumeric, dash, underscore only)
@@ -66,11 +68,11 @@ fi
 echo "Installing new configuration: $TARGET_FILE"
 cp "$SOURCE_FILE" "$TARGET_FILE"
 
-# Get nginx container ID
-NGINX_CONTAINER=$(docker ps -q -f name=nginx | head -n 1)
+# Get nginx container ID (from system stack)
+NGINX_CONTAINER=$(docker ps -q -f name=system_nginx | head -n 1)
 
 if [ -z "$NGINX_CONTAINER" ]; then
-    echo "Error: Nginx container not found. Is nginx service running?" >&2
+    echo "Error: Nginx container not found. Is system stack running?" >&2
     # Restore backup if it exists
     if [ -f "$BACKUP_FILE" ]; then
         echo "Restoring backup configuration..."

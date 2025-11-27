@@ -1,0 +1,155 @@
+#!/bin/sh
+
+# WSO Certificate Generator - OVH DNS method
+# Generates wildcard SSL certificates using Let's Encrypt with OVH DNS-01 challenge
+# Credentials are stored encrypted in systemd-creds
+
+# WSO Paths (hardcoded)
+readonly CERT_DIR="/var/lib/wso/letsencrypt"
+readonly CERT_LIB_DIR="/var/lib/wso/letsencrypt-lib"
+readonly CRED_NAME="wso_ovh_ini"
+
+# Verifica che sia stato fornito almeno un argomento
+if [ -z "$1" ]; then
+    echo "Uso: $0 domain1.com,domain2.com,..."
+    echo ""
+    echo "Questo script genera certificati SSL usando OVH DNS-01 challenge."
+    echo "Supporta wildcard domains (es: *.chdev.eu)"
+    echo ""
+    echo "Esempi:"
+    echo "  $0 chdev.eu,*.chdev.eu"
+    echo "  $0 example.com,*.example.com"
+    exit 1
+fi
+
+# Salva la stringa dei domini
+domains="$1"
+
+# Costruisce la lista di parametri -d per ogni dominio
+domain_args=""
+IFS=','
+for domain in $domains; do
+    domain_args="$domain_args -d $domain"
+done
+unset IFS
+
+# =============================================================================
+# Gestione credenziali OVH in systemd-creds
+# =============================================================================
+
+# Controlla se le credenziali OVH esistono già
+CRED_FILE="/etc/credstore.encrypted/${CRED_NAME}.cred"
+
+if [ ! -f "$CRED_FILE" ]; then
+    echo ""
+    echo "==================================================================="
+    echo "OVH API Credentials Setup"
+    echo "==================================================================="
+    echo ""
+    echo "Le credenziali OVH non sono configurate."
+    echo "Per generare certificati wildcard è necessario configurare l'accesso alle API OVH."
+    echo ""
+    echo "Ottieni le credenziali da:"
+    echo "  - Europa: https://eu.api.ovh.com/createToken/"
+    echo "  - Nord America: https://ca.api.ovh.com/createToken/"
+    echo ""
+    echo "Permessi richiesti:"
+    echo "  - GET  /domain/zone/*"
+    echo "  - PUT /domain/zone/*"
+    echo "  - POST /domain/zone/*"
+    echo "  - DELETE /domain/zone/*"
+    echo ""
+
+    # Ask for OVH endpoint
+    echo "Seleziona l'endpoint OVH:"
+    echo "  1) ovh-eu (Europe)"
+    echo "  2) ovh-ca (North America)"
+    printf "Scelta [1]: "
+    read ovh_endpoint_choice
+    ovh_endpoint_choice=${ovh_endpoint_choice:-1}
+
+    case "$ovh_endpoint_choice" in
+        1)
+            OVH_ENDPOINT="ovh-eu"
+            ;;
+        2)
+            OVH_ENDPOINT="ovh-ca"
+            ;;
+        *)
+            echo "Scelta non valida. Uso ovh-eu"
+            OVH_ENDPOINT="ovh-eu"
+            ;;
+    esac
+
+    echo ""
+    echo "Endpoint selezionato: $OVH_ENDPOINT"
+    echo ""
+
+    # Ask for OVH credentials
+    printf "Application Key: "
+    read OVH_APP_KEY
+    printf "Application Secret: "
+    read OVH_APP_SECRET
+    printf "Consumer Key: "
+    read OVH_CONSUMER_KEY
+
+    # Validate that credentials are not empty
+    if [ -z "$OVH_APP_KEY" ] || [ -z "$OVH_APP_SECRET" ] || [ -z "$OVH_CONSUMER_KEY" ]; then
+        echo "Errore: Tutte le credenziali sono obbligatorie" >&2
+        exit 1
+    fi
+
+    # Create ovh.ini content
+    OVH_INI_CONTENT="# OVH API credentials for certbot-dns-ovh
+dns_ovh_endpoint = $OVH_ENDPOINT
+dns_ovh_application_key = $OVH_APP_KEY
+dns_ovh_application_secret = $OVH_APP_SECRET
+dns_ovh_consumer_key = $OVH_CONSUMER_KEY"
+
+    # Encrypt and save to systemd-creds
+    echo ""
+    echo "Salvando credenziali in systemd-creds..."
+
+    if ! echo "$OVH_INI_CONTENT" | sudo systemd-creds encrypt --name="${CRED_NAME}" - "$CRED_FILE" 2>/dev/null; then
+        echo "Errore: Impossibile salvare le credenziali in systemd-creds" >&2
+        exit 1
+    fi
+
+    sudo chmod 644 "$CRED_FILE"
+
+    echo "✓ Credenziali salvate in: $CRED_FILE"
+    echo ""
+fi
+
+# =============================================================================
+# Generazione certificato con OVH DNS-01
+# =============================================================================
+
+echo "Caricamento credenziali OVH da systemd-creds..."
+
+# Decrypt credentials to temporary file
+TEMP_OVH_INI="/tmp/ovh-$$.ini"
+trap "rm -f $TEMP_OVH_INI" EXIT INT TERM
+
+if ! sudo systemd-creds decrypt --name="${CRED_NAME}" > "$TEMP_OVH_INI" 2>/dev/null; then
+    echo "Errore: Impossibile decifrare le credenziali OVH" >&2
+    echo "Le credenziali potrebbero essere corrotte. Rimuovi $CRED_FILE e riprova." >&2
+    exit 1
+fi
+
+chmod 600 "$TEMP_OVH_INI"
+
+echo "Generazione certificato per:$domain_args"
+echo ""
+
+# Esegui certbot con DNS-01 challenge
+sudo docker run -it --rm --name certbot-ovh \
+  -v "${CERT_DIR}:/etc/letsencrypt" \
+  -v "${CERT_LIB_DIR}:/var/lib/letsencrypt" \
+  -v "${TEMP_OVH_INI}:/secrets/ovh.ini:ro" \
+  certbot/dns-ovh certonly \
+  --dns-ovh \
+  --dns-ovh-credentials /secrets/ovh.ini \
+  $domain_args
+
+# Cleanup è gestito da trap
