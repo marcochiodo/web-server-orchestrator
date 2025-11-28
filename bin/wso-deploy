@@ -393,16 +393,21 @@ while [ $elapsed -lt $MAX_WAIT ]; do
         # No running replicas - check latest task state
         LATEST_TASK=$(docker service ps "$svc" --format '{{.CurrentState}}' --filter 'desired-state=running' --no-trunc 2>/dev/null | head -1)
 
-        if echo "$LATEST_TASK" | grep -qE '(Rejected|Failed)'; then
+        # Handle empty state (task just created, state not yet available)
+        if [ -z "$LATEST_TASK" ]; then
+            log "  ⏳ $svc: Initializing... (${elapsed}s/${MAX_WAIT}s)"
+            ALL_RUNNING=false
+        elif echo "$LATEST_TASK" | grep -qE '(Rejected|Failed)'; then
             error "Service $svc failed: $REPLICAS"
             docker service ps "$svc" --no-trunc --format 'table {{.Name}}\t{{.CurrentState}}\t{{.Error}}' --filter 'desired-state=running' 2>&1 | head -5 >&2
             DEPLOYMENT_FAILED=true
             break
-        elif echo "$LATEST_TASK" | grep -qE '(Preparing|Starting|Assigned|Accepted)'; then
+        elif echo "$LATEST_TASK" | grep -qE '(Preparing|Starting|Assigned|Accepted|New|Pending|Allocated)'; then
             log "  ⏳ $svc: $LATEST_TASK (${elapsed}s/${MAX_WAIT}s)"
             ALL_RUNNING=false
         else
-            error "Service $svc in unexpected state: $LATEST_TASK"
+            error "Service $svc in unexpected state: '$LATEST_TASK'"
+            log "Debug: Run 'docker service ps $svc --no-trunc' for details"
             DEPLOYMENT_FAILED=true
             break
         fi
