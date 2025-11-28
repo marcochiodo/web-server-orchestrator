@@ -143,13 +143,14 @@ echo "Generazione certificato per:$domain_args"
 echo ""
 
 # Esegui certbot con DNS-01 challenge
-sudo docker run -it --rm --name certbot-ovh \
+sudo docker run --rm --name certbot-ovh \
   -v "${CERT_DIR}:/etc/letsencrypt" \
   -v "${CERT_LIB_DIR}:/var/lib/letsencrypt" \
   -v "${TEMP_OVH_INI}:/secrets/ovh.ini:ro" \
   certbot/dns-ovh certonly \
   --dns-ovh \
   --dns-ovh-credentials /secrets/ovh.ini \
+  --non-interactive \
   $domain_args
 
 # Cleanup è gestito da trap

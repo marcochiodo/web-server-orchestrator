@@ -44,8 +44,8 @@ fi
 echo "Generating certificate for:$domain_args"
 echo ""
 
-sudo docker run -it --rm --name certbot \
+sudo docker run --rm --name certbot \
   -v "${CERT_DIR}:/etc/letsencrypt" \
   -v "${CERT_LIB_DIR}:/var/lib/letsencrypt" \
   -v "${ACME_DIR}:/srv/webroot" \
-  certbot/certbot certonly --webroot -w /srv/webroot$domain_args $cert_name_arg
+  certbot/certbot certonly --webroot -w /srv/webroot$domain_args $cert_name_arg --non-interactive
