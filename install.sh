@@ -131,6 +131,10 @@ mkdir -p /var/lib/wso/letsencrypt-lib
 mkdir -p /var/lib/wso/acme-challenge/.well-known/acme-challenge
 mkdir -p /var/lib/wso/data
 
+# /var/lib/wso/secrets - Host secrets (only root can read)
+mkdir -p /var/lib/wso/secrets
+chmod 700 /var/lib/wso/secrets
+
 log_success "Directory structure created"
 
 ################################################################################

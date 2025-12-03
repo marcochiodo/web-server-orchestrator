@@ -133,14 +133,14 @@ domains:
     container_name: webapp
     port: 8080
 
-# Cron jobs with systemd-creds secrets
+# Cron jobs with host secrets
 cron_jobs:
   - schedule: "0 2 * * *"
     command: "curl -H \"Authorization: Bearer $TOKEN\" https://api.example.com/backup"
     secrets:
       TOKEN: backup_token
 
-# Host secrets (systemd-creds)
+# Host secrets (stored in /var/lib/wso/secrets/)
 secrets:
   backup_token: "{{BACKUP_TOKEN}}"
 ```
@@ -152,7 +152,7 @@ wso-deploy manifest.yml
 ```
 
 WSO will automatically:
-1. Manage host secrets (systemd-creds)
+1. Manage host secrets in /var/lib/wso/secrets/
 2. Generate SSL certificates if missing
 3. Generate nginx configuration from domains
 4. Deploy the Docker stack
@@ -250,7 +250,7 @@ docker exec $(docker ps -q -f name=system_nginx) nginx -t
 ## Security
 
 - Deployer user with restricted sudo access
-- All secrets encrypted with systemd-creds
+- All secrets stored with root-only permissions (400)
 - Services isolated in overlay network
 - Modern TLS protocols (TLS 1.2+) with HSTS
 - File integrity verification via checksums

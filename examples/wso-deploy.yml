@@ -46,7 +46,7 @@ stack:
     wso-net:
       external: true
 
-# Host secrets (systemd-creds, for cron jobs)
+# Host secrets (stored in /var/lib/wso/secrets/ with root-only permissions)
 secrets:
   bearer_token: "${BEARER_TOKEN}"
 

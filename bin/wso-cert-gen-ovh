@@ -2,12 +2,13 @@
 
 # WSO Certificate Generator - OVH DNS method
 # Generates wildcard SSL certificates using Let's Encrypt with OVH DNS-01 challenge
-# Credentials are stored encrypted in systemd-creds
+# Credentials are stored as plain files with root-only permissions
 
 # WSO Paths (hardcoded)
 readonly CERT_DIR="/var/lib/wso/letsencrypt"
 readonly CERT_LIB_DIR="/var/lib/wso/letsencrypt-lib"
-readonly CRED_NAME="wso_ovh_ini"
+readonly SECRETS_DIR="/var/lib/wso/secrets"
+readonly OVH_INI_FILE="${SECRETS_DIR}/wso_ovh_ini"
 
 # Verifica che sia stato fornito almeno un argomento
 if [ -z "$1" ]; then
@@ -34,13 +35,11 @@ done
 unset IFS
 
 # =============================================================================
-# Gestione credenziali OVH in systemd-creds
+# Gestione credenziali OVH come file semplice
 # =============================================================================
 
 # Controlla se le credenziali OVH esistono già
-CRED_FILE="/etc/credstore.encrypted/${CRED_NAME}.cred"
-
-if [ ! -f "$CRED_FILE" ]; then
+if [ ! -f "$OVH_INI_FILE" ]; then
     echo ""
     echo "==================================================================="
     echo "OVH API Credentials Setup"
@@ -106,18 +105,24 @@ dns_ovh_application_key = $OVH_APP_KEY
 dns_ovh_application_secret = $OVH_APP_SECRET
 dns_ovh_consumer_key = $OVH_CONSUMER_KEY"
 
-    # Encrypt and save to systemd-creds
-    echo ""
-    echo "Salvando credenziali in systemd-creds..."
+    # Ensure secrets directory exists
+    if [ ! -d "$SECRETS_DIR" ]; then
+        sudo mkdir -p "$SECRETS_DIR"
+        sudo chmod 700 "$SECRETS_DIR"
+    fi
 
-    if ! echo "$OVH_INI_CONTENT" | sudo systemd-creds encrypt --name="${CRED_NAME}" - "$CRED_FILE" 2>/dev/null; then
-        echo "Errore: Impossibile salvare le credenziali in systemd-creds" >&2
+    # Save credentials to file with root-only permissions
+    echo ""
+    echo "Salvando credenziali..."
+
+    if ! echo "$OVH_INI_CONTENT" | sudo tee "$OVH_INI_FILE" > /dev/null; then
+        echo "Errore: Impossibile salvare le credenziali" >&2
         exit 1
     fi
 
-    sudo chmod 644 "$CRED_FILE"
+    sudo chmod 400 "$OVH_INI_FILE"
 
-    echo "✓ Credenziali salvate in: $CRED_FILE"
+    echo "✓ Credenziali salvate in: $OVH_INI_FILE"
     echo ""
 fi
 
@@ -153,15 +158,15 @@ fi
 # Generazione certificato con OVH DNS-01
 # =============================================================================
 
-echo "Caricamento credenziali OVH da systemd-creds..."
+echo "Caricamento credenziali OVH..."
 
-# Decrypt credentials to temporary file
+# Copy credentials to temporary file for docker mount
 TEMP_OVH_INI="/tmp/ovh-$$.ini"
 trap "rm -f $TEMP_OVH_INI" EXIT INT TERM
 
-if ! sudo systemd-creds decrypt --name="${CRED_NAME}" "$CRED_FILE" > "$TEMP_OVH_INI" 2>/dev/null; then
-    echo "Errore: Impossibile decifrare le credenziali OVH" >&2
-    echo "Le credenziali potrebbero essere corrotte. Rimuovi $CRED_FILE e riprova." >&2
+if ! sudo cp "$OVH_INI_FILE" "$TEMP_OVH_INI" 2>/dev/null; then
+    echo "Errore: Impossibile leggere le credenziali OVH" >&2
+    echo "Le credenziali potrebbero essere mancanti. Rimuovi $OVH_INI_FILE e riprova." >&2
     exit 1
 fi
 

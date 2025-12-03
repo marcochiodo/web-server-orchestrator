@@ -6,8 +6,9 @@ set -eu
 #
 # This script reads the 'cron_jobs' array from a WSO manifest and generates
 # a crontab file with:
-# - Proper cron.d format with user specification
-# - Environment variables exported from systemd-creds secrets
+# - Proper cron.d format with user specification (root)
+# - Environment variables loaded from /var/lib/wso/secrets/ (root-only readable)
+# - Commands executed as deployer user for security
 # - Each job with schedule, secrets, and command
 
 log() {
@@ -59,7 +60,7 @@ MANIFEST_PATH="$2"
 OUTPUT_FILE="$3"
 
 # WSO Paths (hardcoded)
-readonly CAT_SECRET_SCRIPT="/usr/lib/wso/scripts/cat-global-secret.sh"
+readonly SECRETS_DIR="/var/lib/wso/secrets"
 
 if [ ! -f "$MANIFEST_PATH" ]; then
     die "Manifest file not found: $MANIFEST_PATH"
@@ -137,11 +138,9 @@ while [ $i -lt "$JOBS_COUNT" ]; do
 
     log "  Job $((i + 1)): $SCHEDULE"
 
-    # Start building the cron line
-    CRON_LINE="$SCHEDULE deployer "
-
-    # Build secrets export chain
-    SECRETS_CHAIN=""
+    # Build secrets loading and export for sudo
+    SECRETS_LOAD=""
+    SECRETS_EXPORT=""
 
     if [ -n "$SECRETS_KEYS" ]; then
         for secret_key in $SECRETS_KEYS; do
@@ -154,27 +153,36 @@ while [ $i -lt "$JOBS_COUNT" ]; do
 
             log "    - Secret: $secret_key -> $SECRET_VALUE"
 
-            # Add secret export to chain
-            if [ -z "$SECRETS_CHAIN" ]; then
-                SECRETS_CHAIN="${secret_key}=\$(sh ${CAT_SECRET_SCRIPT} ${SERVICE_NAME} ${SECRET_VALUE})"
+            # Build secrets loading (read from file as root)
+            SECRET_FILE="${SECRETS_DIR}/${SERVICE_NAME}_${SECRET_VALUE}"
+            if [ -z "$SECRETS_LOAD" ]; then
+                SECRETS_LOAD="${secret_key}=\$(cat ${SECRET_FILE})"
             else
-                SECRETS_CHAIN="${SECRETS_CHAIN} && ${secret_key}=\$(sh ${CAT_SECRET_SCRIPT} ${SERVICE_NAME} ${SECRET_VALUE})"
+                SECRETS_LOAD="${SECRETS_LOAD} && ${secret_key}=\$(cat ${SECRET_FILE})"
+            fi
+
+            # Build secrets export for sudo (pass env vars)
+            if [ -z "$SECRETS_EXPORT" ]; then
+                SECRETS_EXPORT="${secret_key}=\"\$${secret_key}\""
+            else
+                SECRETS_EXPORT="${SECRETS_EXPORT} ${secret_key}=\"\$${secret_key}\""
             fi
         done
     fi
 
     # Build final command
-    if [ -n "$SECRETS_CHAIN" ]; then
-        FULL_COMMAND="${SECRETS_CHAIN} && ${COMMAND}"
+    # Run as root to load secrets, then switch to deployer for execution
+    if [ -n "$SECRETS_LOAD" ]; then
+        FULL_COMMAND="sh -c '${SECRETS_LOAD} && sudo -u deployer ${SECRETS_EXPORT} sh -c \"${COMMAND}\"'"
     else
-        FULL_COMMAND="$COMMAND"
+        FULL_COMMAND="sudo -u deployer sh -c \"${COMMAND}\""
     fi
 
-    # Write cron line
+    # Write cron line (user is root to read secrets)
     cat >> "$TEMP_OUTPUT" <<EOF
 
 # Job $((i + 1))
-${CRON_LINE}${FULL_COMMAND}
+${SCHEDULE} root ${FULL_COMMAND}
 EOF
 
     i=$((i + 1))

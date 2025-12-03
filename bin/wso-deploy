@@ -160,16 +160,16 @@ fi
 log "  ✓ Stack configuration extracted"
 
 # =============================================================================
-# Manage Host Secrets (systemd-creds)
+# Manage Host Secrets (plain files with root-only permissions)
 # =============================================================================
 
 manage_host_secrets() {
-    log "Managing host secrets (systemd-creds)..."
+    log "Managing host secrets..."
 
-    CREDSTORE_DIR="/etc/credstore.encrypted"
-    if [ ! -d "$CREDSTORE_DIR" ]; then
-        mkdir -p "$CREDSTORE_DIR" || die "Failed to create $CREDSTORE_DIR"
-        chmod 755 "$CREDSTORE_DIR"
+    SECRETS_DIR="/var/lib/wso/secrets"
+    if [ ! -d "$SECRETS_DIR" ]; then
+        mkdir -p "$SECRETS_DIR" || die "Failed to create $SECRETS_DIR"
+        chmod 700 "$SECRETS_DIR"
     fi
 
     SECRET_COUNT="$(parse_manifest '.secrets | length')"
@@ -191,44 +191,39 @@ manage_host_secrets() {
             die "Host secret '$secret_name' has unresolved placeholder: $secret_value"
         fi
 
-        CRED_NAME="${SERVICE_NAME}_${secret_name}"
-        CRED_FILE="${CREDSTORE_DIR}/${CRED_NAME}.cred"
+        SECRET_NAME="${SERVICE_NAME}_${secret_name}"
+        SECRET_FILE="${SECRETS_DIR}/${SECRET_NAME}"
 
         NEW_HASH="$(echo -n "$secret_value" | sha256sum | cut -d' ' -f1)"
 
-        if [ -f "$CRED_FILE" ]; then
-            HASH_FILE="${CRED_FILE}.hash"
+        if [ -f "$SECRET_FILE" ]; then
+            HASH_FILE="${SECRET_FILE}.hash"
             OLD_HASH=""
             if [ -f "$HASH_FILE" ]; then
                 OLD_HASH="$(cat "$HASH_FILE")"
             fi
 
             if [ "$NEW_HASH" = "$OLD_HASH" ]; then
-                log "  ✓ Secret '$CRED_NAME' unchanged"
+                log "  ✓ Secret '$SECRET_NAME' unchanged"
                 continue
             else
-                log "  ↻ Secret '$CRED_NAME' changed, updating..."
+                log "  ↻ Secret '$SECRET_NAME' changed, updating..."
             fi
         else
-            log "  + Creating secret '$CRED_NAME'..."
+            log "  + Creating secret '$SECRET_NAME'..."
         fi
 
-        TEMP_CRED="/tmp/${CRED_NAME}-$$.cred"
-        if ! echo -n "$secret_value" | systemd-creds encrypt --name="${CRED_NAME}" - "$TEMP_CRED" 2>/dev/null; then
-            rm -f "$SECRETS_TEMP" "$TEMP_CRED"
-            die "Failed to encrypt secret '$CRED_NAME'. Ensure systemd-creds is available."
-        fi
-
-        mv "$TEMP_CRED" "$CRED_FILE" || {
-            rm -f "$SECRETS_TEMP" "$TEMP_CRED"
-            die "Failed to save credential to $CRED_FILE"
+        # Write secret to file with root-only permissions
+        echo -n "$secret_value" > "$SECRET_FILE" || {
+            rm -f "$SECRETS_TEMP"
+            die "Failed to save secret to $SECRET_FILE"
         }
 
-        chmod 644 "$CRED_FILE"
-        echo "$NEW_HASH" > "${CRED_FILE}.hash"
-        chmod 644 "${CRED_FILE}.hash"
+        chmod 400 "$SECRET_FILE"
+        echo "$NEW_HASH" > "${SECRET_FILE}.hash"
+        chmod 400 "${SECRET_FILE}.hash"
 
-        log "  ✓ Secret '$CRED_NAME' saved"
+        log "  ✓ Secret '$SECRET_NAME' saved"
     done < "$SECRETS_TEMP"
 
     rm -f "$SECRETS_TEMP"
@@ -472,9 +467,9 @@ log "  docker stack ps ${SERVICE_NAME} --no-trunc"
 log "  docker service logs -f ${SERVICE_NAME}_<service>"
 log "  docker stack rm ${SERVICE_NAME}"
 log ""
-log "Host secrets (systemd-creds, namespaced as ${SERVICE_NAME}_*):"
-log "  ls -la /etc/credstore.encrypted/${SERVICE_NAME}_*"
-log "  sh /srv/wso/scripts/cat-global-secret.sh ${SERVICE_NAME} <secret_name>"
+log "Host secrets (plain files, namespaced as ${SERVICE_NAME}_*):"
+log "  ls -la /var/lib/wso/secrets/${SERVICE_NAME}_*"
+log "  sh /usr/lib/wso/scripts/cat-global-secret.sh ${SERVICE_NAME} <secret_name>"
 if [ "$HAS_CRONTAB" = true ]; then
     log ""
     log "Crontab:"
