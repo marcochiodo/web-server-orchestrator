@@ -436,6 +436,14 @@ if [ "$HAS_CRONTAB" = true ]; then
     log "Installing crontab..."
     CRON_FILE="/etc/cron.d/${SERVICE_NAME}"
 
+    # Verify crontab syntax before installing
+    if ! crontab -n "$TEMP_CRONTAB" 2>&1 | grep -q "successfully checked"; then
+        crontab -n "$TEMP_CRONTAB" 2>&1 | head -5 >&2
+        die "Invalid crontab syntax generated for $SERVICE_NAME"
+    fi
+
+    CRONTAB_CHANGED=false
+
     if [ -f "$CRON_FILE" ]; then
         OLD_HASH="$(sha256sum "$CRON_FILE" | cut -d' ' -f1)"
         NEW_HASH="$(sha256sum "$TEMP_CRONTAB" | cut -d' ' -f1)"
@@ -446,13 +454,25 @@ if [ "$HAS_CRONTAB" = true ]; then
             log "  ↻ Crontab changed, updating..."
             cp "$TEMP_CRONTAB" "$CRON_FILE" || die "Failed to install crontab"
             chmod 644 "$CRON_FILE"
+            CRONTAB_CHANGED=true
             log "  ✓ Crontab updated"
         fi
     else
         log "  + Installing new crontab..."
         cp "$TEMP_CRONTAB" "$CRON_FILE" || die "Failed to install crontab"
         chmod 644 "$CRON_FILE"
+        CRONTAB_CHANGED=true
         log "  ✓ Crontab installed"
+    fi
+
+    # Reload cron service if crontab changed
+    if [ "$CRONTAB_CHANGED" = true ]; then
+        if systemctl is-active --quiet cron 2>/dev/null; then
+            systemctl reload cron
+        elif systemctl is-active --quiet cronie 2>/dev/null; then
+            systemctl reload cronie
+        fi
+        log "  ✓ Cron service reloaded"
     fi
 fi
 

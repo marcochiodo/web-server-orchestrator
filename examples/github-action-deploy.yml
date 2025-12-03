@@ -9,8 +9,17 @@
 # Required Variables:
 #   SSH_KNOWN_HOSTS, WSO_HOST
 #
-# Template variables (use ${VAR} syntax in wso-deploy.yml, interpolated via envsubst):
+# Template variables (use ${VAR} or $VAR syntax in wso-deploy.yml, interpolated via envsubst):
 #   ENVIRONMENT, API_KEY, BEARER_TOKEN
+#
+# IMPORTANT: envsubst replaces ONLY the variables listed in VARS
+# This preserves other variables (like $SECRET in cron commands) from being replaced
+#
+# Example usage in wso-deploy.yml:
+#   service: myapp-${ENVIRONMENT}
+#   secrets:
+#     api_key: "${API_KEY}"
+#     bearer_token: "${BEARER_TOKEN}"
 
 name: Deploy to WSO
 
@@ -38,7 +47,12 @@ jobs:
           API_KEY: ${{ secrets.API_KEY }}
           BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
         run: |
-          envsubst < deployment/wso-deploy.yml > /tmp/manifest.yml
+          VARS='
+            $ENVIRONMENT
+            $API_KEY
+            $BEARER_TOKEN
+          '
+          envsubst "$VARS" < deployment/wso-deploy.yml > /tmp/manifest.yml
 
       - name: Deploy
         env:

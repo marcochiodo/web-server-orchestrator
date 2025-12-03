@@ -390,6 +390,19 @@ log_info "Installing certificate renewal cron job..."
 copy_file "$SCRIPT_DIR/etc/cron.d/wso-cert-renew" "/etc/cron.d/wso-cert-renew" "wso-cert-renew cron"
 chmod 644 /etc/cron.d/wso-cert-renew
 
+# Verify crontab syntax
+if ! crontab -n /etc/cron.d/wso-cert-renew 2>/dev/null; then
+    log_error "Invalid crontab syntax in wso-cert-renew"
+    exit 1
+fi
+
+# Reload cron service
+if systemctl is-active --quiet cron 2>/dev/null; then
+    systemctl reload cron
+elif systemctl is-active --quiet cronie 2>/dev/null; then
+    systemctl reload cronie
+fi
+
 log_success "Certificate renewal cron job installed"
 
 ################################################################################
