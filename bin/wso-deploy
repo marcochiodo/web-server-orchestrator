@@ -465,12 +465,12 @@ if [ "$HAS_CRONTAB" = true ]; then
         log "  ✓ Crontab installed"
     fi
 
-    # Reload cron service if crontab changed
+    # Reload cron service if crontab changed (restart if reload not supported)
     if [ "$CRONTAB_CHANGED" = true ]; then
         if systemctl is-active --quiet cron 2>/dev/null; then
-            systemctl reload cron
+            systemctl reload cron 2>/dev/null || systemctl restart cron
         elif systemctl is-active --quiet cronie 2>/dev/null; then
-            systemctl reload cronie
+            systemctl reload cronie 2>/dev/null || systemctl restart cronie
         fi
         log "  ✓ Cron service reloaded"
     fi

@@ -396,11 +396,11 @@ if ! crontab -n /etc/cron.d/wso-cert-renew 2>/dev/null; then
     exit 1
 fi
 
-# Reload cron service
+# Reload cron service (restart if reload not supported)
 if systemctl is-active --quiet cron 2>/dev/null; then
-    systemctl reload cron
+    systemctl reload cron 2>/dev/null || systemctl restart cron
 elif systemctl is-active --quiet cronie 2>/dev/null; then
-    systemctl reload cronie
+    systemctl reload cronie 2>/dev/null || systemctl restart cronie
 fi
 
 log_success "Certificate renewal cron job installed"
