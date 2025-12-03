@@ -179,11 +179,9 @@ while [ $i -lt "$JOBS_COUNT" ]; do
     fi
 
     # Write cron line (user is root to read secrets)
-    cat >> "$TEMP_OUTPUT" <<EOF
-
-# Job $((i + 1))
-${SCHEDULE} root ${FULL_COMMAND}
-EOF
+    echo "" >> "$TEMP_OUTPUT"
+    echo "# Job $((i + 1))" >> "$TEMP_OUTPUT"
+    printf "%s root %s\n" "$SCHEDULE" "$FULL_COMMAND" >> "$TEMP_OUTPUT"
 
     i=$((i + 1))
 done
