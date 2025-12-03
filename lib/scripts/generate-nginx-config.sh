@@ -9,7 +9,7 @@ set -eu
 # - Server blocks for each domain (port 80 and 443)
 # - ACME challenge location for certbot
 # - Optional force HTTPS redirect
-# - Service-specific subdomain on chdev.eu
+# - Service-specific subdomain on main domain
 
 log() {
     printf "[generate-nginx-config] %s\n" "$*" >&2
@@ -61,6 +61,17 @@ OUTPUT_FILE="$3"
 
 # WSO Paths (hardcoded)
 readonly ACME_WEBROOT="/var/lib/wso/acme-challenge"
+
+# Load WSO configuration to get MAIN_DOMAIN
+if [ -f /etc/wso/wso.conf ]; then
+    . /etc/wso/wso.conf
+else
+    die "WSO configuration not found: /etc/wso/wso.conf"
+fi
+
+if [ -z "$MAIN_DOMAIN" ]; then
+    die "MAIN_DOMAIN not set in /etc/wso/wso.conf"
+fi
 
 if [ ! -f "$MANIFEST_PATH" ]; then
     die "Manifest file not found: $MANIFEST_PATH"
@@ -211,15 +222,15 @@ EOF
 done
 
 # =============================================================================
-# Add service-specific chdev.eu subdomain
+# Add service-specific main domain subdomain
 # =============================================================================
 
-log "Adding service-specific chdev.eu subdomain..."
+log "Adding service-specific $MAIN_DOMAIN subdomain..."
 
-CHDEV_DOMAIN="${SERVICE_NAME}.chdev.eu"
-CHDEV_CERT_PATH="/etc/letsencrypt/live/chdev.eu"
+SERVICE_SUBDOMAIN="${SERVICE_NAME}.${MAIN_DOMAIN}"
+MAIN_CERT_PATH="/etc/letsencrypt/live/${MAIN_DOMAIN}"
 
-# Determine container and port for chdev.eu subdomain
+# Determine container and port for main domain subdomain
 # Priority: default_domain > domains[0]
 DEFAULT_CONTAINER="$(parse_manifest '.default_domain.container_name // .domains[0].container_name')"
 DEFAULT_PORT="$(parse_manifest '.default_domain.port // .domains[0].port // 8080')"
@@ -228,16 +239,16 @@ if [ -z "$DEFAULT_CONTAINER" ] || [ "$DEFAULT_CONTAINER" = "null" ]; then
     die "Either 'default_domain.container_name' or 'domains[0].container_name' must be specified"
 fi
 
-CHDEV_UPSTREAM="${SERVICE_NAME}_${DEFAULT_CONTAINER}"
+SERVICE_UPSTREAM="${SERVICE_NAME}_${DEFAULT_CONTAINER}"
 
-log "  - $CHDEV_DOMAIN -> $CHDEV_UPSTREAM:$DEFAULT_PORT (cert: chdev.eu wildcard)"
+log "  - $SERVICE_SUBDOMAIN -> $SERVICE_UPSTREAM:$DEFAULT_PORT (cert: $MAIN_DOMAIN wildcard)"
 
 cat >> "$TEMP_OUTPUT" <<EOF
-# HTTP server block for service-specific chdev.eu subdomain
+# HTTP server block for service-specific main domain subdomain
 server {
     listen [::]:80;
     listen 80;
-    server_name $CHDEV_DOMAIN;
+    server_name $SERVICE_SUBDOMAIN;
 
     # ACME challenge for Let's Encrypt certificate validation
     location /.well-known/acme-challenge {
@@ -260,7 +271,7 @@ else
     cat >> "$TEMP_OUTPUT" <<EOF
     # Proxy to container
     location / {
-        proxy_pass http://${CHDEV_UPSTREAM}:${DEFAULT_PORT};
+        proxy_pass http://${SERVICE_UPSTREAM}:${DEFAULT_PORT};
         include /etc/nginx/conf.d/includes/proxy-common.conf;
     }
 }
@@ -269,22 +280,22 @@ EOF
 fi
 
 cat >> "$TEMP_OUTPUT" <<EOF
-# HTTPS server block for service-specific chdev.eu subdomain
+# HTTPS server block for service-specific main domain subdomain
 server {
     listen [::]:443 ssl;
     listen 443 ssl;
-    server_name $CHDEV_DOMAIN;
+    server_name $SERVICE_SUBDOMAIN;
 
-    # SSL Certificate paths (using chdev.eu wildcard)
-    ssl_certificate     ${CHDEV_CERT_PATH}/fullchain.pem;
-    ssl_certificate_key ${CHDEV_CERT_PATH}/privkey.pem;
+    # SSL Certificate paths (using main domain wildcard)
+    ssl_certificate     ${MAIN_CERT_PATH}/fullchain.pem;
+    ssl_certificate_key ${MAIN_CERT_PATH}/privkey.pem;
 
     # Include common SSL configuration
     include /etc/nginx/conf.d/includes/ssl-common.conf;
 
     # Proxy to container
     location / {
-        proxy_pass http://${CHDEV_UPSTREAM}:${DEFAULT_PORT};
+        proxy_pass http://${SERVICE_UPSTREAM}:${DEFAULT_PORT};
         include /etc/nginx/conf.d/includes/proxy-common.conf;
     }
 

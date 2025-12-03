@@ -204,7 +204,8 @@ chmod +x /usr/lib/wso/scripts/*.sh
 copy_file "$SCRIPT_DIR/lib/docker/system-compose.yml" "/usr/lib/wso/docker/system-compose.yml" "system-compose.yml"
 
 # Copy nginx configuration files to /var/lib/wso/nginx
-copy_file "$SCRIPT_DIR/lib/nginx/default.conf" "/var/lib/wso/nginx/default.conf" "nginx default.conf"
+# Note: default.conf will be processed later with envsubst after MAIN_DOMAIN is set
+cp "$SCRIPT_DIR/lib/nginx/default.conf" "/tmp/wso-default.conf.template"
 copy_file "$SCRIPT_DIR/lib/nginx/ssl-common.conf" "/etc/wso/nginx-includes/ssl-common.conf" "ssl-common.conf"
 copy_file "$SCRIPT_DIR/lib/nginx/proxy-common.conf" "/etc/wso/nginx-includes/proxy-common.conf" "proxy-common.conf"
 
@@ -218,22 +219,78 @@ log_success "WSO files copied"
 ################################################################################
 log_info "Configuring WSO..."
 
-if [ ! -f "/etc/wso/wso.conf" ]; then
-    echo ""
-    log_info "Default domain configuration for service subdomains"
-    read -p "Enter default domain [chdev.eu]: " CHDEV_DOMAIN
-    CHDEV_DOMAIN=${CHDEV_DOMAIN:-chdev.eu}
-
-    cat > /etc/wso/wso.conf <<EOF
-# WSO Global Configuration
-# Default domain for service subdomains (e.g., service-name.chdev.eu)
-CHDEV_DOMAIN=$CHDEV_DOMAIN
-EOF
-
-    log_success "WSO configuration created"
-else
-    log_info "WSO configuration already exists"
+# Load existing config if present
+if [ -f "/etc/wso/wso.conf" ]; then
     source /etc/wso/wso.conf
+fi
+
+# Check if MAIN_DOMAIN is defined and not empty
+if [ -z "${MAIN_DOMAIN:-}" ]; then
+    echo ""
+    log_info "Main domain configuration for service subdomains"
+    echo "  This domain will be used for service subdomains (e.g., service-name.example.com)"
+    read -p "Enter main domain: " MAIN_DOMAIN
+
+    if [ -z "$MAIN_DOMAIN" ]; then
+        log_error "Main domain cannot be empty"
+        exit 1
+    fi
+
+    # Update or create config file
+    if [ -f "/etc/wso/wso.conf" ]; then
+        # Check if MAIN_DOMAIN line exists
+        if grep -q "^MAIN_DOMAIN=" /etc/wso/wso.conf; then
+            # Update existing line
+            sed -i "s|^MAIN_DOMAIN=.*|MAIN_DOMAIN=$MAIN_DOMAIN|" /etc/wso/wso.conf
+            log_success "WSO configuration updated"
+        else
+            # Append MAIN_DOMAIN to existing file
+            echo "MAIN_DOMAIN=$MAIN_DOMAIN" >> /etc/wso/wso.conf
+            log_success "WSO configuration updated"
+        fi
+    else
+        # Create new config file
+        cat > /etc/wso/wso.conf <<EOF
+# WSO Global Configuration
+# Main domain for service subdomains (e.g., service-name.$MAIN_DOMAIN)
+MAIN_DOMAIN=$MAIN_DOMAIN
+EOF
+        log_success "WSO configuration created"
+    fi
+else
+    log_success "MAIN_DOMAIN already configured: $MAIN_DOMAIN"
+fi
+
+# Generate default.conf with MAIN_DOMAIN substituted
+export MAIN_DOMAIN
+if [ -f /tmp/wso-default.conf.template ]; then
+    envsubst '$MAIN_DOMAIN' < /tmp/wso-default.conf.template > /tmp/wso-default.conf.generated
+    rm /tmp/wso-default.conf.template
+
+    if [ ! -f /var/lib/wso/nginx/default.conf ]; then
+        cp /tmp/wso-default.conf.generated /var/lib/wso/nginx/default.conf
+        log_success "Created: nginx default.conf"
+    else
+        src_checksum=$(md5sum /tmp/wso-default.conf.generated | awk '{print $1}')
+        dst_checksum=$(md5sum /var/lib/wso/nginx/default.conf | awk '{print $1}')
+
+        if [ "$src_checksum" = "$dst_checksum" ]; then
+            log_info "Unchanged: nginx default.conf"
+        else
+            echo ""
+            log_warning "File differs: nginx default.conf"
+            read -p "Do you want to update it? [y/N]: " -n 1 -r
+            echo
+
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                cp /tmp/wso-default.conf.generated /var/lib/wso/nginx/default.conf
+                log_success "Updated: nginx default.conf"
+            else
+                log_info "Skipped: nginx default.conf"
+            fi
+        fi
+    fi
+    rm /tmp/wso-default.conf.generated
 fi
 
 ################################################################################
@@ -396,6 +453,63 @@ else
 fi
 
 ################################################################################
+# Generate wildcard certificate for main domain
+################################################################################
+echo ""
+log_info "Wildcard SSL certificate generation"
+
+MAIN_CERT_PATH="/var/lib/wso/letsencrypt/live/$MAIN_DOMAIN/fullchain.pem"
+
+if [ -f "$MAIN_CERT_PATH" ]; then
+    log_success "Certificate for $MAIN_DOMAIN already exists"
+
+    read -p "Do you want to regenerate the wildcard certificate? [y/N]: " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        GENERATE_CERT=true
+    else
+        GENERATE_CERT=false
+    fi
+else
+    read -p "Do you want to generate the wildcard certificate? [y/N]: " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        GENERATE_CERT=true
+    else
+        GENERATE_CERT=false
+    fi
+fi
+
+if [ "$GENERATE_CERT" = true ]; then
+    echo ""
+    log_info "Certificate domain configuration"
+    echo "  Enter domains separated by space:"
+    echo "  - Main domain only: example.com"
+    echo "    → Generates: example.com, *.example.com"
+    echo "  - With subdomains: example.com api.example.com"
+    echo "    → Generates: example.com, *.example.com, api.example.com, *.api.example.com"
+    echo ""
+    read -p "Enter domains [$MAIN_DOMAIN]: " CERT_DOMAINS
+    CERT_DOMAINS=${CERT_DOMAINS:-$MAIN_DOMAIN}
+
+    # Build certificate domains list with wildcards
+    CERT_LIST=""
+    for domain in $CERT_DOMAINS; do
+        if [ -z "$CERT_LIST" ]; then
+            CERT_LIST="$domain,*.$domain"
+        else
+            CERT_LIST="$CERT_LIST,$domain,*.$domain"
+        fi
+    done
+
+    log_info "Generating certificate for: $CERT_LIST"
+    wso-cert-gen-ovh "$CERT_LIST"
+    log_success "Wildcard certificate generated"
+fi
+
+################################################################################
 # Deploy system stack
 ################################################################################
 log_info "Checking system stack..."
@@ -439,36 +553,6 @@ else
     else
         log_error "Nginx verification failed - check 'docker service ps system_nginx'"
         exit 1
-    fi
-fi
-
-################################################################################
-# Generate wildcard certificate for chdev.eu
-################################################################################
-echo ""
-log_info "Checking wildcard certificate for $CHDEV_DOMAIN..."
-
-CHDEV_CERT_PATH="/var/lib/wso/letsencrypt/live/$CHDEV_DOMAIN/fullchain.pem"
-
-if [ -f "$CHDEV_CERT_PATH" ]; then
-    log_success "Certificate for $CHDEV_DOMAIN already exists"
-
-    read -p "Do you want to regenerate the $CHDEV_DOMAIN wildcard certificate? [y/N]: " -n 1 -r
-    echo
-
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Generating wildcard certificate for $CHDEV_DOMAIN..."
-        wso-cert-gen-ovh "$CHDEV_DOMAIN,*.$CHDEV_DOMAIN"
-        log_success "Wildcard certificate for $CHDEV_DOMAIN generated"
-    fi
-else
-    read -p "Do you want to generate the $CHDEV_DOMAIN wildcard certificate? [y/N]: " -n 1 -r
-    echo
-
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Generating wildcard certificate for $CHDEV_DOMAIN..."
-        wso-cert-gen-ovh "$CHDEV_DOMAIN,*.$CHDEV_DOMAIN"
-        log_success "Wildcard certificate for $CHDEV_DOMAIN generated"
     fi
 fi
 
