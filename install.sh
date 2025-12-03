@@ -485,24 +485,16 @@ fi
 if [ "$GENERATE_CERT" = true ]; then
     echo ""
     log_info "Certificate domain configuration"
-    echo "  Enter domains separated by space:"
-    echo "  - Main domain only: example.com"
-    echo "    → Generates: example.com, *.example.com"
-    echo "  - With subdomains: example.com api.example.com"
-    echo "    → Generates: example.com, *.example.com, api.example.com, *.api.example.com"
+    echo "  Enter domains separated by spaces (use wildcards as needed):"
+    echo "  Examples:"
+    echo "    example.com *.example.com"
+    echo "    example.com *.example.com *.api.example.com"
     echo ""
-    read -p "Enter domains [$MAIN_DOMAIN]: " CERT_DOMAINS
-    CERT_DOMAINS=${CERT_DOMAINS:-$MAIN_DOMAIN}
+    read -p "Enter domains [$MAIN_DOMAIN *.$MAIN_DOMAIN]: " CERT_DOMAINS
+    CERT_DOMAINS=${CERT_DOMAINS:-"$MAIN_DOMAIN *.$MAIN_DOMAIN"}
 
-    # Build certificate domains list with wildcards
-    CERT_LIST=""
-    for domain in $CERT_DOMAINS; do
-        if [ -z "$CERT_LIST" ]; then
-            CERT_LIST="$domain,*.$domain"
-        else
-            CERT_LIST="$CERT_LIST,$domain,*.$domain"
-        fi
-    done
+    # Convert spaces to commas for certbot
+    CERT_LIST=$(echo "$CERT_DOMAINS" | tr ' ' ',')
 
     log_info "Generating certificate for: $CERT_LIST"
     wso-cert-gen-ovh "$CERT_LIST"
