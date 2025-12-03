@@ -122,6 +122,34 @@ dns_ovh_consumer_key = $OVH_CONSUMER_KEY"
 fi
 
 # =============================================================================
+# Configurazione email per Let's Encrypt
+# =============================================================================
+
+# Check if email is already stored in WSO config
+if [ -f /etc/wso/wso.conf ]; then
+    . /etc/wso/wso.conf
+fi
+
+if [ -z "${LETSENCRYPT_EMAIL:-}" ]; then
+    echo ""
+    printf "Email per notifiche Let's Encrypt: "
+    read LETSENCRYPT_EMAIL
+
+    if [ -z "$LETSENCRYPT_EMAIL" ]; then
+        echo "Errore: Email obbligatoria per Let's Encrypt" >&2
+        exit 1
+    fi
+
+    # Save email to config
+    if grep -q "^LETSENCRYPT_EMAIL=" /etc/wso/wso.conf 2>/dev/null; then
+        sudo sed -i "s|^LETSENCRYPT_EMAIL=.*|LETSENCRYPT_EMAIL=$LETSENCRYPT_EMAIL|" /etc/wso/wso.conf
+    else
+        echo "LETSENCRYPT_EMAIL=$LETSENCRYPT_EMAIL" | sudo tee -a /etc/wso/wso.conf >/dev/null
+    fi
+    echo "✓ Email salvata in configurazione"
+fi
+
+# =============================================================================
 # Generazione certificato con OVH DNS-01
 # =============================================================================
 
@@ -151,6 +179,8 @@ sudo docker run --rm --name certbot-ovh \
   --dns-ovh \
   --dns-ovh-credentials /secrets/ovh.ini \
   --non-interactive \
+  --agree-tos \
+  --email "$LETSENCRYPT_EMAIL" \
   $domain_args
 
 # Cleanup è gestito da trap
